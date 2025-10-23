@@ -1,4 +1,4 @@
-package com.generateflavors.generate_flavors
+package com.generateflavors
 
 import io.flutter.embedding.android.FlutterActivity
 

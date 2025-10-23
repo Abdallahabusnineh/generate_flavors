@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.generateflavors.generate_flavors"
+    namespace = "com.generateflavors"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -21,7 +21,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.generateflavors.generate_flavors"
+        applicationId = "com.generateflavors"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
