@@ -67,6 +67,22 @@ String _toSnakeCase(String input) {
       .replaceAll(RegExp(r'^_|_$'), '');
 }
 
+String _toTitleCase(String input) {
+  return input
+      .replaceAllMapped(
+        RegExp(r'([a-z])([A-Z])'),
+        (match) => '${match.group(1)} ${match.group(2)}',
+      )
+      .split(' ')
+      .map(
+        (word) =>
+            word.isNotEmpty
+                ? '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}'
+                : '',
+      )
+      .join(' ');
+}
+
 Future<void> _createEnvFiles(List<String> flavors) async {
   print('📁 Creating .env files...');
   for (final flavor in flavors) {
@@ -97,6 +113,7 @@ Future<void> _setupAndroid(List<String> flavors, String appName) async {
   }
 
   var content = await targetFile.readAsString();
+  final displayAppName = _toTitleCase(appName);
 
   if (content.contains('productFlavors')) {
     print('⚠️ Android flavors already configured in ${targetFile.path}');
@@ -110,7 +127,7 @@ ${flavors.map((f) => '''
         create("$f") {
             dimension = "default"
             applicationIdSuffix = ".$f"
-            resValue("string", "app_name", "$appName ${f.toUpperCase()}")
+            resValue("string", "app_name", "$displayAppName ${f.toUpperCase()}")
         }''').join('\n')}
     }
 '''
@@ -121,7 +138,7 @@ ${flavors.map((f) => '''
         $f {
             dimension "default"
             applicationIdSuffix ".$f"
-            resValue "string", "app_name", "$appName ${f.toUpperCase()}"
+            resValue "string", "app_name", "$displayAppName ${f.toUpperCase()}"
         }''').join('\n')}
     }
 ''';
@@ -144,7 +161,7 @@ ${flavors.map((f) => '''
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.example.myapp.$flavor">
     <application
-        android:label="$appName ${flavor.toUpperCase()}"
+        android:label="$displayAppName ${flavor.toUpperCase()}"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
@@ -169,6 +186,7 @@ Future<void> _setupIOS(List<String> flavors, String appName) async {
 
   final schemesDir = Directory('ios/Runner.xcodeproj/xcshareddata/xcschemes');
   schemesDir.createSync(recursive: true);
+  final displayAppName = _toTitleCase(appName);
 
   for (final flavor in flavors) {
     final plistDir = Directory('ios/Runner/$flavor');
@@ -182,7 +200,7 @@ Future<void> _setupIOS(List<String> flavors, String appName) async {
 <plist version="1.0">
 <dict>
     <key>CFBundleDisplayName</key>
-    <string>$appName ${flavor.toUpperCase()}</string>
+    <string>$displayAppName ${flavor.toUpperCase()}</string>
     <key>CFBundleIdentifier</key>
     <string>com.example.myapp.$flavor</string>
 </dict>
