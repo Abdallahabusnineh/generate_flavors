@@ -115,7 +115,6 @@ Future<void> _setupAndroid(List<String> flavors, String appName) async {
   }
 
   var content = await targetFile.readAsString();
-  final displayAppName = _toTitleCase(appName);
 
   if (content.contains('productFlavors')) {
     print('⚠️ Android flavors already configured in ${targetFile.path}');
@@ -129,7 +128,7 @@ ${flavors.map((f) => '''
         create("$f") {
             dimension = "default"
             ${f != 'prod' ? 'applicationIdSuffix = ".$f"' : ''}
-            manifestPlaceholders["appName"] = "$displayAppName${f != 'prod' ? ' ${f.toUpperCase()}' : ''}"
+            resValue("string", "app_name", "$appName${f != 'prod' ? ' ${f.toUpperCase()}' : ''}")
         }''').join('\n')}
     }
 '''
@@ -140,7 +139,7 @@ ${flavors.map((f) => '''
         $f {
             dimension "default"
             ${f != 'prod' ? 'applicationIdSuffix ".$f"' : ''}
-            manifestPlaceholders appName: "$displayAppName${f != 'prod' ? ' ${f.toUpperCase()}' : ''}"
+            resValue "string", "app_name", "$appName${f != 'prod' ? ' ${f.toUpperCase()}' : ''}"
         }''').join('\n')}
     }
 ''';
@@ -154,35 +153,23 @@ ${flavors.map((f) => '''
     print('✅ Updated ${targetFile.path} with flavors.');
   }
 
-  // Update main AndroidManifest.xml to use placeholders
+  // Update main AndroidManifest.xml to use @string/app_name
   final mainManifest = File('android/app/src/main/AndroidManifest.xml');
   if (mainManifest.existsSync()) {
     var manifestContent = await mainManifest.readAsString();
 
-    // Check if placeholders are already configured
+    // Replace android:label with @string/app_name
     if (!manifestContent.contains('android:label="@string/app_name"')) {
-      // Update the application label to use the placeholder
-      manifestContent = manifestContent.replaceFirstMapped(
+      manifestContent = manifestContent.replaceAllMapped(
         RegExp(r'android:label="[^"]*"'),
         (match) => 'android:label="@string/app_name"',
       );
 
-      // If no label found, add it to the application tag
-      if (!manifestContent.contains('android:label=')) {
-        manifestContent = manifestContent.replaceFirstMapped(
-          RegExp(r'<application([^>]*)>'),
-          (match) =>
-              '<application${match.group(1)} android:label="@string/app_name">',
-        );
-      }
-
       await mainManifest.writeAsString(manifestContent);
-      print('✅ Updated main AndroidManifest.xml to use app_name placeholder');
+      print('✅ Updated AndroidManifest.xml to use @string/app_name');
     } else {
-      print('⚠️ Main AndroidManifest.xml already uses app_name placeholder');
+      print('⚠️ AndroidManifest.xml already uses @string/app_name');
     }
-  } else {
-    print('⚠️ Main AndroidManifest.xml not found');
   }
 }
 
