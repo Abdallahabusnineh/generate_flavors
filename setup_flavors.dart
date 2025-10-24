@@ -6,7 +6,7 @@ import 'dart:io';
 Future<void> main() async {
   // Get app name
   stdout.write(
-    'Enter your app name (must start with a letter and contain only letters and numbers and no spaces): (e.g. MyAwesomeApp):',
+    'Enter your app name (must start with a letter and contain only letters and numbers and no spaces): (e.g. MyAwesomeApp): ',
   );
   String? appNameInput = stdin.readLineSync();
   appNameInput = appNameInput?.trim();
@@ -178,68 +178,341 @@ Future<void> _setupIOS(List<String> flavors, String appName) async {
 
   final schemesDir = Directory('ios/Runner.xcodeproj/xcshareddata/xcschemes');
   schemesDir.createSync(recursive: true);
-  final displayAppName = _toTitleCase(appName);
 
-  // Update main Info.plist to use placeholders
-  final mainPlist = File('ios/Runner/Info.plist');
-  if (mainPlist.existsSync()) {
-    var plistContent = await mainPlist.readAsString();
-
-    // Check if placeholders are already configured
-    if (!plistContent.contains('CFBundleDisplayName')) {
-      // Add CFBundleDisplayName placeholder
-      plistContent = plistContent.replaceFirstMapped(
-        RegExp(r'<dict>'),
-        (match) => '''<dict>
-    <key>CFBundleDisplayName</key>
-    <string>\$(APP_DISPLAY_NAME)</string>''',
-      );
-      await mainPlist.writeAsString(plistContent);
-      print('✅ Updated main Info.plist to use APP_DISPLAY_NAME placeholder');
-    } else {
-      print('⚠️ Main Info.plist already uses APP_DISPLAY_NAME placeholder');
-    }
-  } else {
-    print('⚠️ Main Info.plist not found');
+  // Delete the default Runner.xcscheme if it exists
+  final defaultScheme = File('${schemesDir.path}/Runner.xcscheme');
+  if (defaultScheme.existsSync()) {
+    defaultScheme.deleteSync();
+    print('✅ Deleted default Runner.xcscheme');
   }
 
+  // Read and modify project.pbxproj
+  final pbxprojFile = File('ios/Runner.xcodeproj/project.pbxproj');
+  if (!pbxprojFile.existsSync()) {
+    print('❌ project.pbxproj not found');
+    return;
+  }
+
+  var pbxContent = await pbxprojFile.readAsString();
+
+  // Find Runner target ID
+  String? runnerTargetId;
+  final targetMatch = RegExp(
+    r'([A-F0-9]{24}) \/\* Runner \*\/ = \{[^}]*isa = PBXNativeTarget',
+  ).firstMatch(pbxContent);
+  if (targetMatch != null) {
+    runnerTargetId = targetMatch.group(1);
+    print('✅ Found Runner target ID: $runnerTargetId');
+  } else {
+    runnerTargetId = '97C146ED1CF9000F007C117D';
+    print('⚠️ Using fallback Runner target ID');
+  }
+
+  // Find existing configuration IDs
+  final debugConfigMatch = RegExp(
+    r'([A-F0-9]{24}) \/\* Debug \*\/ = \{',
+  ).firstMatch(pbxContent);
+  final releaseConfigMatch = RegExp(
+    r'([A-F0-9]{24}) \/\* Release \*\/ = \{',
+  ).firstMatch(pbxContent);
+  final profileConfigMatch = RegExp(
+    r'([A-F0-9]{24}) \/\* Profile \*\/ = \{',
+  ).firstMatch(pbxContent);
+
+  if (debugConfigMatch == null || releaseConfigMatch == null) {
+    print('❌ Could not find Debug/Release configurations');
+    return;
+  }
+
+  // Generate new configuration IDs and add them
+  final configsToAdd = <String, Map<String, String>>{};
+
   for (final flavor in flavors) {
-    final scheme = File('${schemesDir.path}/Runner-$flavor.xcscheme');
+    configsToAdd['Debug-$flavor'] = {
+      'id': _generateXcodeId(),
+      'base': 'Debug',
+      'baseId': debugConfigMatch.group(1)!,
+      'xcconfig': 'Debug-$flavor.xcconfig',
+    };
+    configsToAdd['Release-$flavor'] = {
+      'id': _generateXcodeId(),
+      'base': 'Release',
+      'baseId': releaseConfigMatch.group(1)!,
+      'xcconfig': 'Release-$flavor.xcconfig',
+    };
+    if (profileConfigMatch != null) {
+      configsToAdd['Profile-$flavor'] = {
+        'id': _generateXcodeId(),
+        'base': 'Profile',
+        'baseId': profileConfigMatch.group(1)!,
+        'xcconfig': 'Profile-$flavor.xcconfig',
+      };
+    }
+  }
+
+  // Add build configurations to XCConfigurationList
+  pbxContent = _addBuildConfigurationsToPbxproj(pbxContent, configsToAdd);
+
+  // Associate xcconfig files with configurations
+  pbxContent = _associateXcconfigFiles(pbxContent, configsToAdd);
+
+  await pbxprojFile.writeAsString(pbxContent);
+  print('✅ Updated project.pbxproj with build configurations');
+
+  for (final flavor in flavors) {
+    // Create flavor-specific configuration in xcconfig files
+    final debugConfigDir = Directory('ios/Flutter');
+    debugConfigDir.createSync(recursive: true);
+
+    final debugConfig = File('ios/Flutter/Debug-$flavor.xcconfig');
+    if (!debugConfig.existsSync()) {
+      debugConfig.writeAsStringSync('''
+#include "Generated.xcconfig"
+PRODUCT_BUNDLE_IDENTIFIER = com.example.myapp${flavor != 'prod' ? '.$flavor' : ''}
+PRODUCT_NAME = $appName${flavor != 'prod' ? ' ${flavor.toUpperCase()}' : ''}
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+''');
+      print('✅ Created Debug-$flavor.xcconfig');
+    }
+
+    final releaseConfig = File('ios/Flutter/Release-$flavor.xcconfig');
+    if (!releaseConfig.existsSync()) {
+      releaseConfig.writeAsStringSync('''
+#include "Generated.xcconfig"
+PRODUCT_BUNDLE_IDENTIFIER = com.example.myapp${flavor != 'prod' ? '.$flavor' : ''}
+PRODUCT_NAME = $appName${flavor != 'prod' ? ' ${flavor.toUpperCase()}' : ''}
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+''');
+      print('✅ Created Release-$flavor.xcconfig');
+    }
+
+    final profileConfig = File('ios/Flutter/Profile-$flavor.xcconfig');
+    if (!profileConfig.existsSync()) {
+      profileConfig.writeAsStringSync('''
+#include "Generated.xcconfig"
+PRODUCT_BUNDLE_IDENTIFIER = com.example.myapp${flavor != 'prod' ? '.$flavor' : ''}
+PRODUCT_NAME = $appName${flavor != 'prod' ? ' ${flavor.toUpperCase()}' : ''}
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+''');
+      print('✅ Created Profile-$flavor.xcconfig');
+    }
+
+    // Create Xcode scheme with just the flavor name
+    final scheme = File('${schemesDir.path}/$flavor.xcscheme');
     if (!scheme.existsSync()) {
-      final appDisplayName =
-          '$displayAppName${flavor != 'prod' ? ' ${flavor.toUpperCase()}' : ''}';
       scheme.writeAsStringSync('''
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion="1430"
-   version="1.7">
-   <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES">
+   LastUpgradeVersion = "1510"
+   version = "1.7">
+   <BuildAction
+      parallelizeBuildables = "YES"
+      buildImplicitDependencies = "YES">
       <BuildActionEntries>
-         <BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">
-            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="13B07F861A680F5B00A75B9A" BuildableName="Runner.app" BlueprintName="Runner" ReferencedContainer="container:Runner.xcodeproj"/>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "$runnerTargetId"
+               BuildableName = "Runner.app"
+               BlueprintName = "Runner"
+               ReferencedContainer = "container:Runner.xcodeproj">
+            </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
-   <TestAction buildConfiguration="$flavor" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES"/>
-   <LaunchAction buildConfiguration="$flavor" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" debugServiceExtension="internal" allowLocationSimulation="YES">
-      <EnvironmentVariables>
-         <EnvironmentVariable key="APP_DISPLAY_NAME" value="$appDisplayName" isEnabled="YES"/>
-      </EnvironmentVariables>
+   <TestAction
+      buildConfiguration = "Debug-$flavor"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      shouldUseLaunchSchemeArgsEnv = "YES">
+      <Testables>
+      </Testables>
+   </TestAction>
+   <LaunchAction
+      buildConfiguration = "Debug-$flavor"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      launchStyle = "0"
+      useCustomWorkingDirectory = "NO"
+      ignoresPersistentStateOnLaunch = "NO"
+      debugDocumentVersioning = "YES"
+      debugServiceExtension = "internal"
+      allowLocationSimulation = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "$runnerTargetId"
+            BuildableName = "Runner.app"
+            BlueprintName = "Runner"
+            ReferencedContainer = "container:Runner.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
    </LaunchAction>
-   <ProfileAction buildConfiguration="$flavor" shouldUseLaunchSchemeArgsEnv="YES" savedToolIdentifier="" useCustomWorkingDirectory="NO" debugDocumentVersioning="YES"/>
-   <AnalyzeAction buildConfiguration="$flavor"/>
-   <ArchiveAction buildConfiguration="$flavor" revealArchiveInOrganizer="YES"/>
+   <ProfileAction
+      buildConfiguration = "Profile-$flavor"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      savedToolIdentifier = ""
+      useCustomWorkingDirectory = "NO"
+      debugDocumentVersioning = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "$runnerTargetId"
+            BuildableName = "Runner.app"
+            BlueprintName = "Runner"
+            ReferencedContainer = "container:Runner.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
+   </ProfileAction>
+   <AnalyzeAction
+      buildConfiguration = "Debug-$flavor">
+   </AnalyzeAction>
+   <ArchiveAction
+      buildConfiguration = "Release-$flavor"
+      revealArchiveInOrganizer = "YES">
+   </ArchiveAction>
 </Scheme>
 ''');
-      print('✅ Created Xcode scheme for $flavor');
+      print('✅ Created Xcode scheme: $flavor.xcscheme');
     } else {
-      print('⚠️ Xcode scheme for $flavor already exists, skipped');
+      print('⚠️ Xcode scheme $flavor.xcscheme already exists, skipped');
     }
   }
 
-  print(
-    '\n⚠️ Note: You may need to manually configure build configurations in Xcode (ios/Runner.xcodeproj)',
-  );
+  print('\n✅ iOS flavors fully configured!');
+  print('   Run: flutter run --flavor dev -t lib/main_dev.dart');
+}
+
+String _generateXcodeId() {
+  final random =
+      DateTime.now().millisecondsSinceEpoch.toRadixString(16).toUpperCase();
+  final padding = '0' * (24 - random.length);
+  return '$padding$random';
+}
+
+String _addBuildConfigurationsToPbxproj(
+  String content,
+  Map<String, Map<String, String>> configs,
+) {
+  // Find the XCBuildConfiguration section
+  final buildConfigSectionMatch = RegExp(
+    r'\/\* Begin XCBuildConfiguration section \*\/(.*?)\/\* End XCBuildConfiguration section \*\/',
+    multiLine: true,
+    dotAll: true,
+  ).firstMatch(content);
+
+  if (buildConfigSectionMatch == null) {
+    print('⚠️ Could not find XCBuildConfiguration section');
+    return content;
+  }
+
+  var buildConfigSection = buildConfigSectionMatch.group(1)!;
+  final sectionStart = buildConfigSectionMatch.start;
+  final sectionEnd = buildConfigSectionMatch.end;
+
+  // Add new configurations
+  for (final entry in configs.entries) {
+    final configName = entry.key;
+    final configData = entry.value;
+
+    if (content.contains('/* $configName */')) {
+      continue; // Already exists
+    }
+
+    // Find a sample config to copy structure from
+    final sampleConfigMatch = RegExp(
+      r'([A-F0-9]{24}) \/\* ' +
+          configData['base']! +
+          r' \*\/ = \{[^}]*buildSettings = \{[^}]*\};[^}]*\};',
+      multiLine: true,
+      dotAll: true,
+    ).firstMatch(buildConfigSection);
+
+    if (sampleConfigMatch != null) {
+      var newConfig = sampleConfigMatch.group(0)!;
+      newConfig = newConfig.replaceFirst(
+        RegExp(r'([A-F0-9]{24})'),
+        configData['id']!,
+      );
+      newConfig = newConfig.replaceAll(
+        '/* ${configData['base']} */',
+        '/* $configName */',
+      );
+      newConfig = newConfig.replaceFirstMapped(
+        RegExp(r'name = [^;]+;'),
+        (match) => 'name = $configName;',
+      );
+
+      buildConfigSection += '\n$newConfig';
+    }
+  }
+
+  content =
+      '${content.substring(0, sectionStart)}/* Begin XCBuildConfiguration section */$buildConfigSection/* End XCBuildConfiguration section */${content.substring(sectionEnd)}';
+
+  // Now add references to XCConfigurationList
+  final configListMatch = RegExp(
+    r'(buildConfigurations = \(\s*(?:[A-F0-9]{24} \/\* [^*]+ \*\/,\s*)*)',
+    multiLine: true,
+  ).allMatches(content);
+
+  for (final match in configListMatch) {
+    var configList = match.group(1)!;
+    for (final entry in configs.entries) {
+      final configName = entry.key;
+      final configData = entry.value;
+
+      if (!configList.contains('/* $configName */')) {
+        configList += '${configData['id']} /* $configName */,\n\t\t\t\t';
+      }
+    }
+    content = content.replaceFirst(match.group(1)!, configList);
+  }
+
+  return content;
+}
+
+String _associateXcconfigFiles(
+  String content,
+  Map<String, Map<String, String>> configs,
+) {
+  for (final entry in configs.entries) {
+    final configName = entry.key;
+    final configData = entry.value;
+    final xcconfigFile = configData['xcconfig']!;
+
+    // Find the configuration block and add baseConfigurationReference
+    final configBlockPattern = RegExp(
+      '${configData['id']} \\/\\* $configName \\*\\/ = \\{[^}]*buildSettings = \\{',
+      multiLine: true,
+    );
+
+    final configMatch = configBlockPattern.firstMatch(content);
+    if (configMatch != null) {
+      // Check if baseConfigurationReference already exists
+      final endOfMatch = configMatch.end;
+      final afterMatch = content.substring(endOfMatch, endOfMatch + 500);
+
+      if (!afterMatch.contains('baseConfigurationReference')) {
+        // Add baseConfigurationReference before buildSettings
+        final insertPoint = configMatch.end - 'buildSettings = {'.length;
+        final before = content.substring(0, insertPoint);
+        final after = content.substring(insertPoint);
+
+        content =
+            '${before}baseConfigurationReference = ${_generateXcodeId()} /* $xcconfigFile */;\n\t\t\t$after';
+      }
+    }
+  }
+
+  return content;
 }
 
 Future<void> _splitAndCreateAppFile(String appName, String appFileName) async {
@@ -253,10 +526,6 @@ Future<void> _splitAndCreateAppFile(String appName, String appFileName) async {
   }
 
   var content = await mainFile.readAsString();
-
-  // Find all imports at the beginning (not currently used)
-  // final importMatches = RegExp(r"^import\s+[^;]+;$", multiLine: true).allMatches(content);
-  // final imports = importMatches.map((m) => m.group(0)!).join('\n');
 
   // Find the MyApp class (handles extends, with, implements)
   final classPattern = RegExp(
@@ -344,7 +613,7 @@ class $appName extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-        home: ${appName}Page(title: '$appName'),
+      home: ${appName}Page(title: '$appName'),
     );
   }
 }
@@ -378,7 +647,7 @@ class _${appName}PageState extends State<${appName}Page> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            Text(
+            const Text(
               'You have pushed the button this many times:',
             ),
             Text(
