@@ -179,11 +179,20 @@ Future<void> _setupIOS(List<String> flavors, String appName) async {
   final schemesDir = Directory('ios/Runner.xcodeproj/xcshareddata/xcschemes');
   schemesDir.createSync(recursive: true);
 
-  // Delete the default Runner.xcscheme if it exists
+  // Convert the default Runner.xcscheme to prod.xcscheme if it exists
   final defaultScheme = File('${schemesDir.path}/Runner.xcscheme');
+  final prodScheme = File('${schemesDir.path}/prod.xcscheme');
+
   if (defaultScheme.existsSync()) {
-    defaultScheme.deleteSync();
-    print('✅ Deleted default Runner.xcscheme');
+    if (flavors.contains('prod')) {
+      // Rename Runner.xcscheme to prod.xcscheme
+      await defaultScheme.rename('${schemesDir.path}/prod.xcscheme');
+      print('✅ Converted Runner.xcscheme to prod.xcscheme');
+    } else {
+      // If prod flavor is not requested, delete the default scheme
+      defaultScheme.deleteSync();
+      print('✅ Deleted default Runner.xcscheme (prod flavor not requested)');
+    }
   }
 
   // Read and modify project.pbxproj
@@ -299,6 +308,13 @@ ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
 
     // Create Xcode scheme with just the flavor name
     final scheme = File('${schemesDir.path}/$flavor.xcscheme');
+
+    // Skip creating prod.xcscheme if it was converted from Runner.xcscheme
+    if (flavor == 'prod' && prodScheme.existsSync()) {
+      print('✅ Using converted prod.xcscheme (from Runner.xcscheme)');
+      continue;
+    }
+
     if (!scheme.existsSync()) {
       scheme.writeAsStringSync('''
 <?xml version="1.0" encoding="UTF-8"?>
