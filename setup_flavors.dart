@@ -1,8 +1,19 @@
 import 'dart:io';
-// how to create flutter app with ? ... ?
-// !!!  make dart setup_flavors.dart
+
+// Run with: dart setup_flavors.dart
 
 Future<void> main() async {
+  // Get app name
+  stdout.write('Enter your app name (e.g. MyAwesomeApp): ');
+  final appNameInput = stdin.readLineSync();
+  if (appNameInput == null || appNameInput.trim().isEmpty) {
+    print('❌ No app name entered. Exiting.');
+    exit(0);
+  }
+  final appName = appNameInput.trim();
+  final appFileName = _toSnakeCase(appName);
+
+  // Get flavors
   stdout.write('Enter flavors separated by commas (e.g. dev,qa,prod): ');
   final input = stdin.readLineSync();
   if (input == null || input.trim().isEmpty) {
@@ -14,11 +25,16 @@ Future<void> main() async {
       input.split(',').map((f) => f.trim()).where((f) => f.isNotEmpty).toList();
 
   print('\n🚀 Starting flavor setup for: ${flavors.join(', ')}');
+  print('📱 App Name: $appName');
+  print('📄 App File: lib/$appFileName.dart\n');
 
   await _createEnvFiles(flavors);
-  await _setupAndroid(flavors);
-  await _setupIOS(flavors);
-  await _createDartEntryFiles(flavors);
+  await _setupAndroid(flavors, appName);
+  await _setupIOS(flavors, appName);
+  await _splitAndCreateAppFile(appName, appFileName);
+  await _createDartEntryFiles(flavors, appName, appFileName);
+  await _updateWidgetTest(appName, appFileName);
+  await _deleteMainDart();
 
   print('\n✅ All done! Flavors setup complete 🎉');
   print('\nExample run commands:');
@@ -27,8 +43,20 @@ Future<void> main() async {
   }
 }
 
+String _toSnakeCase(String input) {
+  return input
+      .replaceAllMapped(
+        RegExp(r'([a-z])([A-Z])'),
+        (match) => '${match.group(1)}_${match.group(2)}',
+      )
+      .replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '_')
+      .toLowerCase()
+      .replaceAll(RegExp(r'_+'), '_')
+      .replaceAll(RegExp(r'^_|_$'), '');
+}
+
 Future<void> _createEnvFiles(List<String> flavors) async {
-  print('\n📁 Creating .env files...');
+  print('📁 Creating .env files...');
   for (final flavor in flavors) {
     final file = File('.env.$flavor');
     if (!file.existsSync()) {
@@ -42,7 +70,7 @@ Future<void> _createEnvFiles(List<String> flavors) async {
   }
 }
 
-Future<void> _setupAndroid(List<String> flavors) async {
+Future<void> _setupAndroid(List<String> flavors, String appName) async {
   print('\n🤖 Configuring Android flavors...');
 
   final gradleFile = File('android/app/build.gradle');
@@ -58,7 +86,6 @@ Future<void> _setupAndroid(List<String> flavors) async {
 
   var content = await targetFile.readAsString();
 
-  // Avoid multiple injections
   if (content.contains('productFlavors')) {
     print('⚠️ Android flavors already configured in ${targetFile.path}');
   } else {
@@ -71,7 +98,7 @@ ${flavors.map((f) => '''
         create("$f") {
             dimension = "default"
             applicationIdSuffix = ".$f"
-            resValue("string", "app_name", "MyApp ${f.toUpperCase()}")
+            resValue("string", "app_name", "$appName ${f.toUpperCase()}")
         }''').join('\n')}
     }
 '''
@@ -82,12 +109,11 @@ ${flavors.map((f) => '''
         $f {
             dimension "default"
             applicationIdSuffix ".$f"
-            resValue "string", "app_name", "MyApp ${f.toUpperCase()}"
+            resValue "string", "app_name", "$appName ${f.toUpperCase()}"
         }''').join('\n')}
     }
 ''';
 
-    // Try to inject after defaultConfig block (best-effort).
     final newContent = content.replaceFirstMapped(
       RegExp(r'(defaultConfig\s*\{[^}]*\})', multiLine: true),
       (match) => '${match.group(0)}\n$flavorBlock',
@@ -97,7 +123,6 @@ ${flavors.map((f) => '''
     print('✅ Updated ${targetFile.path} with flavors.');
   }
 
-  // Create AndroidManifest.xml for each flavor
   for (final flavor in flavors) {
     final dir = Directory('android/app/src/$flavor');
     dir.createSync(recursive: true);
@@ -107,7 +132,7 @@ ${flavors.map((f) => '''
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.example.myapp.$flavor">
     <application
-        android:label="MyApp ${flavor.toUpperCase()}"
+        android:label="$appName ${flavor.toUpperCase()}"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
@@ -127,14 +152,13 @@ ${flavors.map((f) => '''
   }
 }
 
-Future<void> _setupIOS(List<String> flavors) async {
+Future<void> _setupIOS(List<String> flavors, String appName) async {
   print('\n🍎 Configuring iOS flavors...');
 
   final schemesDir = Directory('ios/Runner.xcodeproj/xcshareddata/xcschemes');
   schemesDir.createSync(recursive: true);
 
   for (final flavor in flavors) {
-    // Create Info.plist for each flavor
     final plistDir = Directory('ios/Runner/$flavor');
     plistDir.createSync(recursive: true);
     final plist = File('${plistDir.path}/Info.plist');
@@ -146,7 +170,7 @@ Future<void> _setupIOS(List<String> flavors) async {
 <plist version="1.0">
 <dict>
     <key>CFBundleDisplayName</key>
-    <string>MyApp ${flavor.toUpperCase()}</string>
+    <string>$appName ${flavor.toUpperCase()}</string>
     <key>CFBundleIdentifier</key>
     <string>com.example.myapp.$flavor</string>
 </dict>
@@ -157,7 +181,6 @@ Future<void> _setupIOS(List<String> flavors) async {
       print('⚠️ Info.plist for $flavor already exists, skipped');
     }
 
-    // Create Xcode scheme for each flavor (simple template)
     final scheme = File('${schemesDir.path}/Runner-$flavor.xcscheme');
     if (!scheme.existsSync()) {
       scheme.writeAsStringSync('''
@@ -186,12 +209,174 @@ Future<void> _setupIOS(List<String> flavors) async {
   }
 
   print(
-    '\n⚠️ Note: This creates .xcscheme files and Info.plist files, but you may still need to set the corresponding build configurations in ios/Runner.xcodeproj/project.pbxproj (the script does not automatically patch the complex pbxproj). If you want, I can add a pbxproj editor to the script as well.',
+    '\n⚠️ Note: You may need to manually configure build configurations in Xcode (ios/Runner.xcodeproj)',
   );
 }
 
-Future<void> _createDartEntryFiles(List<String> flavors) async {
-  print('\n📦 Creating Flutter entry files in lib/ ...');
+Future<void> _splitAndCreateAppFile(String appName, String appFileName) async {
+  print('\n📦 Extracting app widget from main.dart...');
+
+  final mainFile = File('lib/main.dart');
+  if (!mainFile.existsSync()) {
+    print('❌ lib/main.dart not found. Creating a new app file.');
+    await _createNewAppFile(appName, appFileName);
+    return;
+  }
+
+  var content = await mainFile.readAsString();
+
+  // Find all imports at the beginning (not currently used)
+  // final importMatches = RegExp(r"^import\s+[^;]+;$", multiLine: true).allMatches(content);
+  // final imports = importMatches.map((m) => m.group(0)!).join('\n');
+
+  // Find the MyApp class (handles extends, with, implements)
+  final classPattern = RegExp(
+    r'class\s+MyApp\s+extends\s+\w+(?:\s+with\s+[\w\s,]+)?(?:\s+implements\s+[\w\s,]+)?\s*\{',
+    multiLine: true,
+  );
+
+  final classMatch = classPattern.firstMatch(content);
+
+  if (classMatch == null) {
+    print('⚠️ MyApp class not found in main.dart. Creating new app file.');
+    await _createNewAppFile(appName, appFileName);
+    return;
+  }
+
+  // Extract the full MyApp class by finding matching braces
+  final classStart = classMatch.start;
+  final classCode = _extractClass(content, classStart);
+
+  if (classCode == null) {
+    print('⚠️ Could not extract MyApp class properly. Creating new app file.');
+    await _createNewAppFile(appName, appFileName);
+    return;
+  }
+
+  // Rename MyApp to user's app name
+  final renamedClassCode = classCode.replaceAllMapped(
+    RegExp(r'\bMyApp\b'),
+    (match) => appName,
+  );
+
+  // Create the new app file
+  final appFile = File('lib/$appFileName.dart');
+  appFile.writeAsStringSync('''
+import 'package:flutter/material.dart';
+
+$renamedClassCode
+''');
+  print('✅ Created lib/$appFileName.dart with $appName class');
+}
+
+String? _extractClass(String content, int startPos) {
+  int braceCount = 0;
+  int i = startPos;
+  int classStart = startPos;
+
+  // Find the opening brace
+  while (i < content.length && content[i] != '{') {
+    i++;
+  }
+
+  if (i >= content.length) return null;
+
+  // Now count braces to find the end
+  braceCount = 1;
+  i++;
+
+  while (i < content.length && braceCount > 0) {
+    if (content[i] == '{') {
+      braceCount++;
+    } else if (content[i] == '}') {
+      braceCount--;
+    }
+    i++;
+  }
+
+  if (braceCount != 0) return null;
+
+  return content.substring(classStart, i);
+}
+
+Future<void> _createNewAppFile(String appName, String appFileName) async {
+  final appFile = File('lib/$appFileName.dart');
+  appFile.writeAsStringSync('''
+import 'package:flutter/material.dart';
+
+class $appName extends StatelessWidget {
+  const $appName({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: '$appName',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        useMaterial3: true,
+      ),
+      home: const MyHomePage(title: '$appName Home Page'),
+    );
+  }
+}
+
+class MyHomePage extends StatefulWidget {
+  const MyHomePage({super.key, required this.title});
+
+  final String title;
+
+  @override
+  State<MyHomePage> createState() => _MyHomePageState();
+}
+
+class _MyHomePageState extends State<MyHomePage> {
+  int _counter = 0;
+
+  void _incrementCounter() {
+    setState(() {
+      _counter++;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        title: Text(widget.title),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            const Text(
+              'You have pushed the button this many times:',
+            ),
+            Text(
+              '\$_counter',
+              style: Theme.of(context).textTheme.headlineMedium,
+            ),
+          ],
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _incrementCounter,
+        tooltip: 'Increment',
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+''');
+  print('✅ Created lib/$appFileName.dart with $appName class');
+}
+
+Future<void> _createDartEntryFiles(
+  List<String> flavors,
+  String appName,
+  String appFileName,
+) async {
+  print('\n📦 Creating Flutter entry files in lib/...');
 
   final libDir = Directory('lib');
   if (!libDir.existsSync()) libDir.createSync(recursive: true);
@@ -204,50 +389,70 @@ Future<void> _createDartEntryFiles(List<String> flavors) async {
       continue;
     }
 
-    // Create a simple entry that calls mainCommon from main.dart.
-    // Make sure your lib/main.dart exposes: void mainCommon(String flavor) { ... }
     file.writeAsStringSync('''
-import 'main.dart' as app;
+import 'package:flutter/material.dart';
+import '$appFileName.dart';
 
-/// Entry point for '$flavor' flavor.
-///
-/// This expects that you implemented `void mainCommon(String flavor)`
-/// inside lib/main.dart that sets up the app for the given flavor.
-void main() => app.mainCommon('$flavor');
+/// Entry point for '$flavor' flavor
+void main() {
+  // TODO: Load flavor-specific configuration here
+  // Example: await dotenv.load(fileName: ".env.$flavor");
+  
+  runApp(const $appName());
+}
 ''');
     print('✅ Created $filename');
   }
+}
 
-  // Also create a small sample main.dart if not present (safe default)
+Future<void> _updateWidgetTest(String appName, String appFileName) async {
+  print('\n🧪 Updating test/widget_test.dart...');
+
+  final testFile = File('test/widget_test.dart');
+  if (!testFile.existsSync()) {
+    print('⚠️ test/widget_test.dart not found. Skipping test update.');
+    return;
+  }
+
+  var content = await testFile.readAsString();
+  final packageName = _getPackageName();
+
+  // Replace import from main.dart to the new app file
+  content = content.replaceAllMapped(
+    RegExp("import\\s+['\"]package:.+?/main\\.dart['\"];?"),
+    (match) => "import 'package:$packageName/$appFileName.dart';",
+  );
+
+  // Replace MyApp references with the new app name
+  content = content.replaceAllMapped(RegExp(r'\bMyApp\b'), (match) => appName);
+
+  await testFile.writeAsString(content);
+  print('✅ Updated test/widget_test.dart with correct imports and class names');
+}
+
+String _getPackageName() {
+  final pubspecFile = File('pubspec.yaml');
+  if (!pubspecFile.existsSync()) {
+    return 'myapp'; // fallback
+  }
+
+  final content = pubspecFile.readAsStringSync();
+  final nameMatch = RegExp(
+    r'^name:\s*(.+)$',
+    multiLine: true,
+  ).firstMatch(content);
+  return nameMatch?.group(1)?.trim() ?? 'myapp';
+}
+
+Future<void> _deleteMainDart() async {
+  print('\n🗑️ Deleting lib/main.dart...');
+
   final mainFile = File('lib/main.dart');
   if (!mainFile.existsSync()) {
-    mainFile.writeAsStringSync('''
-import 'package:flutter/material.dart';
-
-/// Example mainCommon implementation used by generated entry points.
-/// Replace with your real app bootstrap and environment loading.
-void mainCommon(String flavor) {
-  runApp(MyApp(flavor: flavor));
-}
-
-class MyApp extends StatelessWidget {
-  final String flavor;
-  const MyApp({required this.flavor, super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'MyApp \$flavor',
-      home: Scaffold(
-        appBar: AppBar(title: Text('Flavor: \$flavor')),
-        body: Center(child: Text('Running flavor: \$flavor')),
-      ),
-    );
+    print('⚠️ lib/main.dart not found. Nothing to delete.');
+    return;
   }
-}
-''');
-    print(
-      '⚠️ lib/main.dart not found — created a sample main.dart. Replace it with your real app bootstrap when ready.',
-    );
-  }
+
+  await mainFile.delete();
+  print('✅ Deleted lib/main.dart');
 }
