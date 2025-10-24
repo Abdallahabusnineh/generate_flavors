@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 // Run with: dart setup_flavors.dart
@@ -47,6 +48,7 @@ Future<void> main() async {
   await _splitAndCreateAppFile(appName, appFileName);
   await _createDartEntryFiles(flavors, appName, appFileName);
   await _updateWidgetTest(appName, appFileName);
+  await _createVSCodeLaunchConfig(flavors, appName);
 
   print('\n✅ All done! Flavors setup complete 🎉');
   print('\nExample run commands:');
@@ -126,8 +128,8 @@ Future<void> _setupAndroid(List<String> flavors, String appName) async {
 ${flavors.map((f) => '''
         create("$f") {
             dimension = "default"
-            applicationIdSuffix = ".$f"
-            resValue("string", "app_name", "$displayAppName ${f.toUpperCase()}")
+            ${f != 'prod' ? 'applicationIdSuffix = ".$f"' : ''}
+            manifestPlaceholders["appName"] = "$displayAppName${f != 'prod' ? ' ${f.toUpperCase()}' : ''}"
         }''').join('\n')}
     }
 '''
@@ -137,8 +139,8 @@ ${flavors.map((f) => '''
 ${flavors.map((f) => '''
         $f {
             dimension "default"
-            applicationIdSuffix ".$f"
-            resValue "string", "app_name", "$displayAppName ${f.toUpperCase()}"
+            ${f != 'prod' ? 'applicationIdSuffix ".$f"' : ''}
+            manifestPlaceholders appName: "$displayAppName${f != 'prod' ? ' ${f.toUpperCase()}' : ''}"
         }''').join('\n')}
     }
 ''';
@@ -152,32 +154,35 @@ ${flavors.map((f) => '''
     print('✅ Updated ${targetFile.path} with flavors.');
   }
 
-  for (final flavor in flavors) {
-    final dir = Directory('android/app/src/$flavor');
-    dir.createSync(recursive: true);
-    final manifest = File('${dir.path}/AndroidManifest.xml');
-    if (!manifest.existsSync()) {
-      manifest.writeAsStringSync('''
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.myapp.$flavor">
-    <application
-        android:label="$displayAppName ${flavor.toUpperCase()}"
-        android:icon="@mipmap/ic_launcher">
-        <activity
-            android:name=".MainActivity"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-    </application>
-</manifest>
-''');
-      print('✅ Created AndroidManifest for $flavor');
+  // Update main AndroidManifest.xml to use placeholders
+  final mainManifest = File('android/app/src/main/AndroidManifest.xml');
+  if (mainManifest.existsSync()) {
+    var manifestContent = await mainManifest.readAsString();
+
+    // Check if placeholders are already configured
+    if (!manifestContent.contains('android:label="@string/app_name"')) {
+      // Update the application label to use the placeholder
+      manifestContent = manifestContent.replaceFirstMapped(
+        RegExp(r'android:label="[^"]*"'),
+        (match) => 'android:label="@string/app_name"',
+      );
+
+      // If no label found, add it to the application tag
+      if (!manifestContent.contains('android:label=')) {
+        manifestContent = manifestContent.replaceFirstMapped(
+          RegExp(r'<application([^>]*)>'),
+          (match) =>
+              '<application${match.group(1)} android:label="@string/app_name">',
+        );
+      }
+
+      await mainManifest.writeAsString(manifestContent);
+      print('✅ Updated main AndroidManifest.xml to use app_name placeholder');
     } else {
-      print('⚠️ AndroidManifest for $flavor already exists, skipped');
+      print('⚠️ Main AndroidManifest.xml already uses app_name placeholder');
     }
+  } else {
+    print('⚠️ Main AndroidManifest.xml not found');
   }
 }
 
@@ -188,31 +193,34 @@ Future<void> _setupIOS(List<String> flavors, String appName) async {
   schemesDir.createSync(recursive: true);
   final displayAppName = _toTitleCase(appName);
 
-  for (final flavor in flavors) {
-    final plistDir = Directory('ios/Runner/$flavor');
-    plistDir.createSync(recursive: true);
-    final plist = File('${plistDir.path}/Info.plist');
-    if (!plist.existsSync()) {
-      plist.writeAsStringSync('''
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
- "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleDisplayName</key>
-    <string>$displayAppName ${flavor.toUpperCase()}</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.example.myapp.$flavor</string>
-</dict>
-</plist>
-''');
-      print('✅ Created Info.plist for $flavor');
-    } else {
-      print('⚠️ Info.plist for $flavor already exists, skipped');
-    }
+  // Update main Info.plist to use placeholders
+  final mainPlist = File('ios/Runner/Info.plist');
+  if (mainPlist.existsSync()) {
+    var plistContent = await mainPlist.readAsString();
 
+    // Check if placeholders are already configured
+    if (!plistContent.contains('CFBundleDisplayName')) {
+      // Add CFBundleDisplayName placeholder
+      plistContent = plistContent.replaceFirstMapped(
+        RegExp(r'<dict>'),
+        (match) => '''<dict>
+    <key>CFBundleDisplayName</key>
+    <string>\$(APP_DISPLAY_NAME)</string>''',
+      );
+      await mainPlist.writeAsString(plistContent);
+      print('✅ Updated main Info.plist to use APP_DISPLAY_NAME placeholder');
+    } else {
+      print('⚠️ Main Info.plist already uses APP_DISPLAY_NAME placeholder');
+    }
+  } else {
+    print('⚠️ Main Info.plist not found');
+  }
+
+  for (final flavor in flavors) {
     final scheme = File('${schemesDir.path}/Runner-$flavor.xcscheme');
     if (!scheme.existsSync()) {
+      final appDisplayName =
+          '$displayAppName${flavor != 'prod' ? ' ${flavor.toUpperCase()}' : ''}';
       scheme.writeAsStringSync('''
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
@@ -226,7 +234,11 @@ Future<void> _setupIOS(List<String> flavors, String appName) async {
       </BuildActionEntries>
    </BuildAction>
    <TestAction buildConfiguration="$flavor" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES"/>
-   <LaunchAction buildConfiguration="$flavor" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" debugServiceExtension="internal" allowLocationSimulation="YES"/>
+   <LaunchAction buildConfiguration="$flavor" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" debugServiceExtension="internal" allowLocationSimulation="YES">
+      <EnvironmentVariables>
+         <EnvironmentVariable key="APP_DISPLAY_NAME" value="$appDisplayName" isEnabled="YES"/>
+      </EnvironmentVariables>
+   </LaunchAction>
    <ProfileAction buildConfiguration="$flavor" shouldUseLaunchSchemeArgsEnv="YES" savedToolIdentifier="" useCustomWorkingDirectory="NO" debugDocumentVersioning="YES"/>
    <AnalyzeAction buildConfiguration="$flavor"/>
    <ArchiveAction buildConfiguration="$flavor" revealArchiveInOrganizer="YES"/>
@@ -472,6 +484,58 @@ String _getPackageName() {
     multiLine: true,
   ).firstMatch(content);
   return nameMatch?.group(1)?.trim() ?? 'myapp';
+}
+
+Future<void> _createVSCodeLaunchConfig(
+  List<String> flavors,
+  String appName,
+) async {
+  print('\n🔧 Creating VS Code/Cursor launch configurations...');
+
+  final vscodeDir = Directory('.vscode');
+  vscodeDir.createSync(recursive: true);
+
+  final launchFile = File('.vscode/launch.json');
+  final displayAppName = _toTitleCase(appName);
+
+  // Create configurations for each flavor in both debug and release modes
+  final configurations = <Map<String, dynamic>>[];
+
+  for (final flavor in flavors) {
+    // Debug configuration
+    configurations.add({
+      'name': '$displayAppName - ${flavor.toUpperCase()} (Debug)',
+      'request': 'launch',
+      'type': 'dart',
+      'program': 'lib/main_$flavor.dart',
+      'args': ['--flavor', flavor],
+      'flutterMode': 'debug',
+    });
+
+    // Release configuration
+    configurations.add({
+      'name': '$displayAppName - ${flavor.toUpperCase()} (Release)',
+      'request': 'launch',
+      'type': 'dart',
+      'program': 'lib/main_$flavor.dart',
+      'args': ['--flavor', flavor],
+      'flutterMode': 'release',
+    });
+  }
+
+  final launchConfig = {'version': '0.2.0', 'configurations': configurations};
+
+  await launchFile.writeAsString(
+    const JsonEncoder.withIndent('    ').convert(launchConfig),
+  );
+
+  print(
+    '✅ Created .vscode/launch.json with ${configurations.length} configurations',
+  );
+  print('   📱 Available launch configurations:');
+  for (final config in configurations) {
+    print('   • ${config['name']}');
+  }
 }
 
 Future<void> _deleteMainDart() async {
