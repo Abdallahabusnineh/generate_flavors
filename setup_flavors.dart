@@ -4,10 +4,22 @@ import 'dart:io';
 
 Future<void> main() async {
   // Get app name
-  stdout.write('Enter your app name (e.g. MyAwesomeApp): ');
-  final appNameInput = stdin.readLineSync();
+  stdout.write(
+    'Enter your app name (must start with a letter and contain only letters and numbers and no spaces): (e.g. MyAwesomeApp):',
+  );
+  String? appNameInput = stdin.readLineSync();
+  appNameInput = appNameInput?.trim();
   if (appNameInput == null || appNameInput.trim().isEmpty) {
     print('❌ No app name entered. Exiting.');
+    exit(0);
+  } else if (!appNameInput.startsWith(RegExp(r'[a-zA-Z]'))) {
+    print('❌ App name must start with a letter. Exiting.');
+    exit(0);
+  } else if (appNameInput.contains(RegExp(r'[^a-zA-Z0-9]'))) {
+    print('❌ App name must contain only letters and numbers. Exiting.');
+    exit(0);
+  } else if (appNameInput.contains(RegExp(r'\s'))) {
+    print('❌ App name must not contain spaces. Exiting.');
     exit(0);
   }
   final appName = appNameInput.trim();
@@ -31,10 +43,10 @@ Future<void> main() async {
   await _createEnvFiles(flavors);
   await _setupAndroid(flavors, appName);
   await _setupIOS(flavors, appName);
+  await _deleteMainDart();
   await _splitAndCreateAppFile(appName, appFileName);
   await _createDartEntryFiles(flavors, appName, appFileName);
   await _updateWidgetTest(appName, appFileName);
-  await _deleteMainDart();
 
   print('\n✅ All done! Flavors setup complete 🎉');
   print('\nExample run commands:');
@@ -315,25 +327,21 @@ class $appName extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: Scaffold(
-        body: Center(
-          child: Text('Hello, $appName!'),
-        ),
-      ),
+        home: ${appName}Page(title: '$appName'),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
+class ${appName}Page extends StatefulWidget {
+  const ${appName}Page({super.key, required this.title});
 
   final String title;
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<${appName}Page> createState() => _${appName}PageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _${appName}PageState extends State<${appName}Page> {
   int _counter = 0;
 
   void _incrementCounter() {
@@ -353,7 +361,7 @@ class _MyHomePageState extends State<MyHomePage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            const Text(
+            Text(
               'You have pushed the button this many times:',
             ),
             Text(
