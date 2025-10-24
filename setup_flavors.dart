@@ -315,7 +315,11 @@ class $appName extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: const MyHomePage(title: '$appName Home Page'),
+      home: Scaffold(
+        body: Center(
+          child: Text('Hello, $appName!'),
+        ),
+      ),
     );
   }
 }
