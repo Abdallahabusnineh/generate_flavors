@@ -189,6 +189,9 @@ Future<void> _setupIOS(
 ) async {
   print('\n🍎 Configuring iOS flavors...');
 
+  // Update Info.plist to use ${PRODUCT_NAME}
+  await _updateInfoPlist();
+
   final schemesDir = Directory('ios/Runner.xcodeproj/xcshareddata/xcschemes');
   schemesDir.createSync(recursive: true);
 
@@ -217,6 +220,42 @@ Future<void> _setupIOS(
 
   var pbxContent = await pbxprojFile.readAsString();
 
+  // Find PROJECT-level buildConfigurationList (THIS IS CRITICAL!)
+  final projectConfigListMatch = RegExp(
+    r'buildConfigurationList = ([A-F0-9]{24}) \/\* Build configuration list for PBXProject "Runner" \*\/',
+  ).firstMatch(pbxContent);
+
+  if (projectConfigListMatch == null) {
+    print('❌ Could not find PROJECT buildConfigurationList');
+    return;
+  }
+
+  final projectConfigListId = projectConfigListMatch.group(1)!;
+  print('✅ Found PROJECT buildConfigurationList ID: $projectConfigListId');
+
+  // Find the PROJECT's configuration IDs
+  final projectConfigPattern = RegExp(
+    projectConfigListId +
+        r' \/\* Build configuration list for PBXProject "Runner" \*\/ = \{[^}]*buildConfigurations = \(\s*([A-F0-9]{24}) \/\* Debug \*\/,\s*([A-F0-9]{24}) \/\* Release \*\/,\s*([A-F0-9]{24}) \/\* Profile \*\/',
+    multiLine: true,
+    dotAll: true,
+  );
+
+  final projectConfigMatch = projectConfigPattern.firstMatch(pbxContent);
+  if (projectConfigMatch == null) {
+    print('❌ Could not find PROJECT configurations');
+    return;
+  }
+
+  final projectDebugConfigId = projectConfigMatch.group(1)!;
+  final projectReleaseConfigId = projectConfigMatch.group(2)!;
+  final projectProfileConfigId = projectConfigMatch.group(3)!;
+
+  print('✅ Found PROJECT configurations:');
+  print('   Debug: $projectDebugConfigId');
+  print('   Release: $projectReleaseConfigId');
+  print('   Profile: $projectProfileConfigId');
+
   // Find Runner target ID
   String? runnerTargetId;
   final targetMatch = RegExp(
@@ -241,7 +280,7 @@ Future<void> _setupIOS(
   }
 
   final runnerConfigListId = runnerConfigListMatch.group(1)!;
-  print('✅ Found Runner buildConfigurationList ID: $runnerConfigListId');
+  print('✅ Found Runner target buildConfigurationList ID: $runnerConfigListId');
 
   // Find the Runner target's configuration IDs from its buildConfigurationList
   final configListPattern = RegExp(
@@ -261,55 +300,317 @@ Future<void> _setupIOS(
   final releaseConfigId = configListMatch.group(2)!;
   final profileConfigId = configListMatch.group(3)!;
 
-  print('✅ Found Runner configurations:');
+  print('✅ Found Runner TARGET configurations:');
   print('   Debug: $debugConfigId');
   print('   Release: $releaseConfigId');
   print('   Profile: $profileConfigId');
 
-  // First, remove any existing flavor configurations to avoid duplicates
-  pbxContent = _removeFlavorConfigurations(pbxContent, flavors);
+  // Find RunnerTests target configurations if they exist
+  String? testsDebugId;
+  String? testsReleaseId;
+  String? testsProfileId;
 
-  // Generate new configuration IDs and add them
-  final configsToAdd = <String, Map<String, String>>{};
+  final testsConfigListMatch = RegExp(
+    r'buildConfigurationList = ([A-F0-9]{24}) \/\* Build configuration list for PBXNativeTarget "RunnerTests" \*\/',
+  ).firstMatch(pbxContent);
 
-  for (final flavor in flavors) {
-    configsToAdd['Debug-$flavor'] = {
-      'id': _generateXcodeId(),
-      'base': 'Debug',
-      'baseId': debugConfigId,
-      'xcconfig': 'Debug.xcconfig',
-    };
-    configsToAdd['Release-$flavor'] = {
-      'id': _generateXcodeId(),
-      'base': 'Release',
-      'baseId': releaseConfigId,
-      'xcconfig': 'Release.xcconfig',
-    };
-    configsToAdd['Profile-$flavor'] = {
-      'id': _generateXcodeId(),
-      'base': 'Profile',
-      'baseId': profileConfigId,
-      'xcconfig': 'Profile.xcconfig',
-    };
+  if (testsConfigListMatch != null) {
+    final testsConfigListId = testsConfigListMatch.group(1)!;
+    final testsConfigPattern = RegExp(
+      testsConfigListId +
+          r' \/\* Build configuration list for PBXNativeTarget "RunnerTests" \*\/ = \{[^}]*buildConfigurations = \(\s*([A-F0-9]{24}) \/\* Debug \*\/,\s*([A-F0-9]{24}) \/\* Release \*\/,\s*([A-F0-9]{24}) \/\* Profile \*\/',
+      multiLine: true,
+      dotAll: true,
+    );
+    final testsMatch = testsConfigPattern.firstMatch(pbxContent);
+    if (testsMatch != null) {
+      testsDebugId = testsMatch.group(1);
+      testsReleaseId = testsMatch.group(2);
+      testsProfileId = testsMatch.group(3);
+      print('✅ Found RunnerTests configurations');
+    }
   }
 
   // Ensure base xcconfig files exist
   _ensureBaseXcconfigFilesExist();
 
-  // Add build configurations to XCConfigurationList
-  pbxContent = _addBuildConfigurationsToPbxproj(pbxContent, configsToAdd);
+  // Step 1: Rename existing base configurations
+  // CRITICAL: Must rename PROJECT configurations first, then TARGET configurations
+  for (final flavor in flavors) {
+    // Rename PROJECT-level configurations (MOST IMPORTANT!)
+    pbxContent = _renameConfiguration(
+      pbxContent,
+      projectDebugConfigId,
+      'Debug',
+      'Debug-$flavor',
+      isFirst: flavor == flavors.first,
+    );
+    pbxContent = _renameConfiguration(
+      pbxContent,
+      projectReleaseConfigId,
+      'Release',
+      'Release-$flavor',
+      isFirst: flavor == flavors.first,
+    );
+    pbxContent = _renameConfiguration(
+      pbxContent,
+      projectProfileConfigId,
+      'Profile',
+      'Profile-$flavor',
+      isFirst: flavor == flavors.first,
+    );
 
-  // Associate xcconfig files with configurations
-  pbxContent = _associateXcconfigFiles(pbxContent, configsToAdd);
+    // Rename Runner TARGET configurations
+    pbxContent = _renameConfiguration(
+      pbxContent,
+      debugConfigId,
+      'Debug',
+      'Debug-$flavor',
+      isFirst: flavor == flavors.first,
+    );
+    pbxContent = _renameConfiguration(
+      pbxContent,
+      releaseConfigId,
+      'Release',
+      'Release-$flavor',
+      isFirst: flavor == flavors.first,
+    );
+    pbxContent = _renameConfiguration(
+      pbxContent,
+      profileConfigId,
+      'Profile',
+      'Profile-$flavor',
+      isFirst: flavor == flavors.first,
+    );
 
-  // Add flavor-specific build settings to each configuration
-  pbxContent = _addFlavorSpecificBuildSettings(
-    pbxContent,
-    configsToAdd,
-    flavors,
-    appName,
-    baseBundleId,
-  );
+    // Also rename RunnerTests configurations if they exist
+    if (testsDebugId != null &&
+        testsReleaseId != null &&
+        testsProfileId != null) {
+      pbxContent = _renameConfiguration(
+        pbxContent,
+        testsDebugId,
+        'Debug',
+        'Debug-$flavor',
+        isFirst: flavor == flavors.first,
+      );
+      pbxContent = _renameConfiguration(
+        pbxContent,
+        testsReleaseId,
+        'Release',
+        'Release-$flavor',
+        isFirst: flavor == flavors.first,
+      );
+      pbxContent = _renameConfiguration(
+        pbxContent,
+        testsProfileId,
+        'Profile',
+        'Profile-$flavor',
+        isFirst: flavor == flavors.first,
+      );
+    }
+
+    // Step 2: Create new configurations for flavors after the first one
+    if (flavor != flavors.first) {
+      // Create PROJECT-level configurations
+      final projectNewDebugId = _generateXcodeId();
+      final projectNewReleaseId = _generateXcodeId();
+      final projectNewProfileId = _generateXcodeId();
+
+      pbxContent = _addNewConfiguration(
+        pbxContent,
+        projectDebugConfigId,
+        projectNewDebugId,
+        'Debug-$flavor',
+      );
+      pbxContent = _addNewConfiguration(
+        pbxContent,
+        projectReleaseConfigId,
+        projectNewReleaseId,
+        'Release-$flavor',
+      );
+      pbxContent = _addNewConfiguration(
+        pbxContent,
+        projectProfileConfigId,
+        projectNewProfileId,
+        'Profile-$flavor',
+      );
+
+      // Add to PROJECT's buildConfigurations list
+      pbxContent = _addConfigToList(
+        pbxContent,
+        projectConfigListId,
+        projectNewDebugId,
+        'Debug-$flavor',
+      );
+      pbxContent = _addConfigToList(
+        pbxContent,
+        projectConfigListId,
+        projectNewReleaseId,
+        'Release-$flavor',
+      );
+      pbxContent = _addConfigToList(
+        pbxContent,
+        projectConfigListId,
+        projectNewProfileId,
+        'Profile-$flavor',
+      );
+
+      // Create Runner TARGET-level configurations
+      final newDebugId = _generateXcodeId();
+      final newReleaseId = _generateXcodeId();
+      final newProfileId = _generateXcodeId();
+
+      pbxContent = _addNewConfiguration(
+        pbxContent,
+        debugConfigId,
+        newDebugId,
+        'Debug-$flavor',
+      );
+      pbxContent = _addNewConfiguration(
+        pbxContent,
+        releaseConfigId,
+        newReleaseId,
+        'Release-$flavor',
+      );
+      pbxContent = _addNewConfiguration(
+        pbxContent,
+        profileConfigId,
+        newProfileId,
+        'Profile-$flavor',
+      );
+
+      // Add to Runner's buildConfigurations list
+      pbxContent = _addConfigToList(
+        pbxContent,
+        runnerConfigListId,
+        newDebugId,
+        'Debug-$flavor',
+      );
+      pbxContent = _addConfigToList(
+        pbxContent,
+        runnerConfigListId,
+        newReleaseId,
+        'Release-$flavor',
+      );
+      pbxContent = _addConfigToList(
+        pbxContent,
+        runnerConfigListId,
+        newProfileId,
+        'Profile-$flavor',
+      );
+
+      // Add to RunnerTests if it exists
+      if (testsConfigListMatch != null) {
+        final testsConfigListId = testsConfigListMatch.group(1)!;
+        final testsNewDebugId = _generateXcodeId();
+        final testsNewReleaseId = _generateXcodeId();
+        final testsNewProfileId = _generateXcodeId();
+
+        pbxContent = _addNewConfiguration(
+          pbxContent,
+          testsDebugId!,
+          testsNewDebugId,
+          'Debug-$flavor',
+        );
+        pbxContent = _addNewConfiguration(
+          pbxContent,
+          testsReleaseId!,
+          testsNewReleaseId,
+          'Release-$flavor',
+        );
+        pbxContent = _addNewConfiguration(
+          pbxContent,
+          testsProfileId!,
+          testsNewProfileId,
+          'Profile-$flavor',
+        );
+
+        pbxContent = _addConfigToList(
+          pbxContent,
+          testsConfigListId,
+          testsNewDebugId,
+          'Debug-$flavor',
+        );
+        pbxContent = _addConfigToList(
+          pbxContent,
+          testsConfigListId,
+          testsNewReleaseId,
+          'Release-$flavor',
+        );
+        pbxContent = _addConfigToList(
+          pbxContent,
+          testsConfigListId,
+          testsNewProfileId,
+          'Profile-$flavor',
+        );
+      }
+
+      // Set flavor-specific build settings for TARGET configurations
+      pbxContent = _setBuildSettings(
+        pbxContent,
+        newDebugId,
+        'Debug-$flavor',
+        flavor,
+        appName,
+        baseBundleId,
+      );
+      pbxContent = _setBuildSettings(
+        pbxContent,
+        newReleaseId,
+        'Release-$flavor',
+        flavor,
+        appName,
+        baseBundleId,
+      );
+      pbxContent = _setBuildSettings(
+        pbxContent,
+        newProfileId,
+        'Profile-$flavor',
+        flavor,
+        appName,
+        baseBundleId,
+      );
+    } else {
+      // For the first flavor, update the renamed TARGET configurations
+      pbxContent = _setBuildSettings(
+        pbxContent,
+        debugConfigId,
+        'Debug-$flavor',
+        flavor,
+        appName,
+        baseBundleId,
+      );
+      pbxContent = _setBuildSettings(
+        pbxContent,
+        releaseConfigId,
+        'Release-$flavor',
+        flavor,
+        appName,
+        baseBundleId,
+      );
+      pbxContent = _setBuildSettings(
+        pbxContent,
+        profileConfigId,
+        'Profile-$flavor',
+        flavor,
+        appName,
+        baseBundleId,
+      );
+    }
+  }
+
+  // Note: PROJECT-level configurations typically don't need PRODUCT_NAME or PRODUCT_BUNDLE_IDENTIFIER
+  // These are set at the TARGET level only
+
+  // Update product file references to use actual product names
+  pbxContent = _updateProductReferences(pbxContent, flavors, appName);
+
+  // Update default configuration name
+  pbxContent = _updateDefaultConfigurationName(pbxContent, flavors);
+
+  // Update project-level configurations
+  pbxContent = _updateProjectConfigurations(pbxContent, flavors);
 
   await pbxprojFile.writeAsString(pbxContent);
   print('✅ Updated project.pbxproj with build configurations');
@@ -461,206 +762,183 @@ void _ensureBaseXcconfigFilesExist() {
   }
 }
 
-/// Adds flavor-specific build settings (bundle ID, app name) to configurations
-String _addFlavorSpecificBuildSettings(
+/// Renames a configuration (only on first occurrence)
+String _renameConfiguration(
   String content,
-  Map<String, Map<String, String>> configs,
-  List<String> flavors,
-  String appName,
-  String baseBundleId,
-) {
-  for (final flavor in flavors) {
-    final bundleId = flavor == 'prod' ? baseBundleId : '$baseBundleId.$flavor';
-    final productName =
-        flavor == 'prod' ? appName : '$appName ${flavor.toUpperCase()}';
+  String configId,
+  String oldName,
+  String newName, {
+  required bool isFirst,
+}) {
+  if (!isFirst) return content; // Only rename on first flavor
 
-    // Update each configuration type (Debug, Release, Profile)
-    for (final type in ['Debug', 'Release', 'Profile']) {
-      final configName = '$type-$flavor';
-      final configId = configs[configName]?['id'];
+  // Rename in ALL occurrences of this config ID's comment
+  content = content.replaceAll(
+    '$configId /* $oldName */',
+    '$configId /* $newName */',
+  );
 
-      if (configId == null) continue;
-
-      // Find the buildSettings section for this configuration
-      final configPattern = RegExp(
-        '$configId \\/\\* $configName \\*\\/ = \\{[^}]*buildSettings = \\{([^}]*)\\};',
-        multiLine: true,
-        dotAll: true,
-      );
-
-      final configMatch = configPattern.firstMatch(content);
-      if (configMatch == null) continue;
-
-      var buildSettings = configMatch.group(1)!;
-
-      // Update or add PRODUCT_BUNDLE_IDENTIFIER
-      if (buildSettings.contains('PRODUCT_BUNDLE_IDENTIFIER')) {
-        buildSettings = buildSettings.replaceAllMapped(
-          RegExp(r'PRODUCT_BUNDLE_IDENTIFIER = [^;]+;'),
-          (match) => 'PRODUCT_BUNDLE_IDENTIFIER = $bundleId;',
-        );
-      } else {
-        buildSettings += '\n\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = $bundleId;';
-      }
-
-      // Update or add PRODUCT_NAME
-      if (buildSettings.contains('PRODUCT_NAME')) {
-        buildSettings = buildSettings.replaceAllMapped(
-          RegExp(r'PRODUCT_NAME = [^;]+;'),
-          (match) => 'PRODUCT_NAME = "$productName";',
-        );
-      } else {
-        buildSettings += '\n\t\t\t\tPRODUCT_NAME = "$productName";';
-      }
-
-      // Add SDKROOT if not present
-      if (!buildSettings.contains('SDKROOT')) {
-        buildSettings += '\n\t\t\t\tSDKROOT = iphoneos;';
-      }
-
-      // Add IPHONEOS_DEPLOYMENT_TARGET if not present
-      if (!buildSettings.contains('IPHONEOS_DEPLOYMENT_TARGET')) {
-        buildSettings += '\n\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 12.0;';
-      }
-
-      // Add TARGETED_DEVICE_FAMILY if not present
-      if (!buildSettings.contains('TARGETED_DEVICE_FAMILY')) {
-        buildSettings += '\n\t\t\t\tTARGETED_DEVICE_FAMILY = "1,2";';
-      }
-
-      // Replace the entire configuration with updated buildSettings
-      content = content.replaceFirst(
-        configPattern,
-        '$configId /* $configName */ = {[^}]*buildSettings = {$buildSettings};',
-      );
-    }
-  }
-
-  return content;
-}
-
-/// Removes existing flavor configurations from project.pbxproj to avoid duplicates
-String _removeFlavorConfigurations(String content, List<String> flavors) {
-  for (final flavor in flavors) {
-    // Remove configuration definitions from XCBuildConfiguration section
-    for (final type in ['Debug', 'Release', 'Profile']) {
-      final configName = '$type-$flavor';
-
-      // Remove the full configuration block
-      // Pattern: ID /* ConfigName */ = { ... };
-      final configBlockPattern = RegExp(
-        r'[A-F0-9]{24} \/\* ' +
-            RegExp.escape(configName) +
-            r' \*\/ = \{[^}]*(?:baseConfigurationReference[^;]*;)?[^}]*buildSettings = \{[^}]*\};[^}]*\};',
-        multiLine: true,
-        dotAll: true,
-      );
-      content = content.replaceAll(configBlockPattern, '');
-
-      // Remove references from buildConfigurations lists
-      // Pattern: ID /* ConfigName */,
-      final refPattern = RegExp(
-        r'\s*[A-F0-9]{24} \/\* ' + RegExp.escape(configName) + r' \*\/,\s*',
-        multiLine: true,
-      );
-      content = content.replaceAll(refPattern, '');
-    }
-  }
-
-  return content;
-}
-
-String _addBuildConfigurationsToPbxproj(
-  String content,
-  Map<String, Map<String, String>> configs,
-) {
-  // Find the XCBuildConfiguration section
-  final buildConfigSectionMatch = RegExp(
-    r'\/\* Begin XCBuildConfiguration section \*\/(.*?)\/\* End XCBuildConfiguration section \*\/',
+  // Rename the name property in the configuration block
+  final configBlockPattern = RegExp(
+    '$configId \\/\\* $newName \\*\\/ = \\{([^}]*?)name = "$oldName";',
     multiLine: true,
     dotAll: true,
-  ).firstMatch(content);
+  );
 
-  if (buildConfigSectionMatch == null) {
-    print('⚠️ Could not find XCBuildConfiguration section');
+  content = content.replaceAllMapped(
+    configBlockPattern,
+    (match) =>
+        '$configId /* $newName */ = {${match.group(1)}name = "$newName";',
+  );
+
+  // Also handle name without quotes
+  final configBlockPattern2 = RegExp(
+    '$configId \\/\\* $newName \\*\\/ = \\{([^}]*?)name = $oldName;',
+    multiLine: true,
+    dotAll: true,
+  );
+
+  content = content.replaceAllMapped(
+    configBlockPattern2,
+    (match) =>
+        '$configId /* $newName */ = {${match.group(1)}name = "$newName";',
+  );
+
+  return content;
+}
+
+/// Adds a new configuration by copying an existing one
+String _addNewConfiguration(
+  String content,
+  String sourceConfigId,
+  String newConfigId,
+  String newConfigName,
+) {
+  // Find the source configuration block
+  final configBlockPattern = RegExp(
+    sourceConfigId +
+        r' \/\* [^*]+ \*\/ = \{[^}]*?isa = XCBuildConfiguration;[^}]*?buildSettings = \{[^}]*?\};[^}]*?\};',
+    multiLine: true,
+    dotAll: true,
+  );
+
+  final match = configBlockPattern.firstMatch(content);
+  if (match == null) {
+    print('⚠️ Could not find source configuration $sourceConfigId');
     return content;
   }
 
-  var buildConfigSection = buildConfigSectionMatch.group(1)!;
-  final sectionStart = buildConfigSectionMatch.start;
-  final sectionEnd = buildConfigSectionMatch.end;
+  var newConfigBlock = match.group(0)!;
 
-  // Add new configurations
-  for (final entry in configs.entries) {
-    final configName = entry.key;
-    final configData = entry.value;
+  // Replace the ID
+  newConfigBlock = newConfigBlock.replaceFirst(sourceConfigId, newConfigId);
 
-    if (content.contains('/* $configName */')) {
-      continue; // Already exists
-    }
+  // Replace the comment
+  newConfigBlock = newConfigBlock.replaceFirstMapped(
+    RegExp(r'\/\* [^*]+ \*\/'),
+    (m) => '/* $newConfigName */',
+  );
 
-    // Use the specific base configuration ID to copy from the Runner target's config
-    final baseConfigId = configData['baseId']!;
-    final sampleConfigMatch = RegExp(
-      baseConfigId +
-          r' \/\* ' +
-          configData['base']! +
-          r' \*\/ = \{[^}]*buildSettings = \{[^}]*\};[^}]*\};',
-      multiLine: true,
-      dotAll: true,
-    ).firstMatch(buildConfigSection);
+  // Replace the name property
+  newConfigBlock = newConfigBlock.replaceFirstMapped(
+    RegExp(r'name = "[^"]+";'),
+    (m) => 'name = "$newConfigName";',
+  );
+  newConfigBlock = newConfigBlock.replaceFirstMapped(
+    RegExp(r'name = [^;]+;'),
+    (m) => 'name = "$newConfigName";',
+  );
 
-    if (sampleConfigMatch != null) {
-      var newConfig = sampleConfigMatch.group(0)!;
-      // Replace the ID with the new configuration ID
-      newConfig = newConfig.replaceFirst(baseConfigId, configData['id']!);
-      // Replace the configuration name in the comment
-      newConfig = newConfig.replaceFirst(
-        '/* ${configData['base']} */',
-        '/* $configName */',
-      );
-      // Replace the name property
-      newConfig = newConfig.replaceFirstMapped(
-        RegExp(r'name = [^;]+;'),
-        (match) => 'name = $configName;',
-      );
-
-      buildConfigSection += '\n$newConfig';
-    }
-  }
-
-  content =
-      '${content.substring(0, sectionStart)}/* Begin XCBuildConfiguration section */$buildConfigSection/* End XCBuildConfiguration section */${content.substring(sectionEnd)}';
-
-  // Now add references to XCConfigurationList
-  final configListMatch = RegExp(
-    r'(buildConfigurations = \(\s*(?:[A-F0-9]{24} \/\* [^*]+ \*\/,\s*)*)',
+  // Find the XCBuildConfiguration section and add the new config
+  final sectionPattern = RegExp(
+    r'(\/\* Begin XCBuildConfiguration section \*\/.*?)(\/\* End XCBuildConfiguration section \*\/)',
     multiLine: true,
-  ).allMatches(content);
+    dotAll: true,
+  );
 
-  for (final match in configListMatch) {
-    var configList = match.group(1)!;
-    for (final entry in configs.entries) {
-      final configName = entry.key;
-      final configData = entry.value;
-
-      if (!configList.contains('/* $configName */')) {
-        configList += '${configData['id']} /* $configName */,\n\t\t\t\t';
-      }
-    }
-    content = content.replaceFirst(match.group(1)!, configList);
-  }
+  content = content.replaceFirstMapped(
+    sectionPattern,
+    (match) => '${match.group(1)}\n\t\t$newConfigBlock\n\t\t${match.group(2)}',
+  );
 
   return content;
 }
 
-String _associateXcconfigFiles(
+/// Adds a configuration to a buildConfigurations list
+String _addConfigToList(
   String content,
-  Map<String, Map<String, String>> configs,
+  String configListId,
+  String configId,
+  String configName,
 ) {
-  // Since we're copying from base configurations that already have
-  // baseConfigurationReference set, we don't need to add it again.
-  // The copied configurations already reference the correct xcconfig files.
+  // Find the buildConfigurations list for this configListId
+  final listPattern = RegExp(
+    '($configListId \\/\\* [^*]+ \\*\\/ = \\{[^}]*?buildConfigurations = \\()',
+    multiLine: true,
+    dotAll: true,
+  );
+
+  content = content.replaceFirstMapped(
+    listPattern,
+    (match) => '${match.group(1)}\n\t\t\t\t$configId /* $configName */,',
+  );
+
+  return content;
+}
+
+/// Sets build settings for a configuration
+String _setBuildSettings(
+  String content,
+  String configId,
+  String configName,
+  String flavor,
+  String appName,
+  String baseBundleId,
+) {
+  final bundleId = flavor == 'prod' ? baseBundleId : '$baseBundleId.$flavor';
+  final productName =
+      flavor == 'prod' ? appName : '$appName ${flavor.toUpperCase()}';
+
+  // Find the buildSettings block for this configuration
+  final buildSettingsPattern = RegExp(
+    '($configId \\/\\* $configName \\*\\/ = \\{[^}]*?buildSettings = \\{)([^}]*?)(\\};)',
+    multiLine: true,
+    dotAll: true,
+  );
+
+  content = content.replaceFirstMapped(buildSettingsPattern, (match) {
+    var settings = match.group(2)!;
+
+    // Update PRODUCT_BUNDLE_IDENTIFIER
+    if (settings.contains('PRODUCT_BUNDLE_IDENTIFIER')) {
+      settings = settings.replaceAllMapped(
+        RegExp(r'PRODUCT_BUNDLE_IDENTIFIER = [^;]+;'),
+        (m) => 'PRODUCT_BUNDLE_IDENTIFIER = $bundleId;',
+      );
+    } else {
+      settings += '\n\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = $bundleId;';
+    }
+
+    // Update PRODUCT_NAME
+    if (settings.contains('PRODUCT_NAME')) {
+      settings = settings.replaceAllMapped(
+        RegExp(r'PRODUCT_NAME = [^;]+;'),
+        (m) => 'PRODUCT_NAME = "$productName";',
+      );
+    } else {
+      settings += '\n\t\t\t\tPRODUCT_NAME = "$productName";';
+    }
+
+    return '${match.group(1)}$settings${match.group(3)}';
+  });
+
+  return content;
+}
+
+/// Updates project-level build configurations
+String _updateProjectConfigurations(String content, List<String> flavors) {
+  // The project-level configurations are already updated through renaming
+  // This function exists for future enhancements if needed
   return content;
 }
 
@@ -985,6 +1263,79 @@ Future<void> _createVSCodeLaunchConfig(
   for (final config in configurations) {
     print('   • ${config['name']}');
   }
+}
+
+/// Updates Info.plist to use ${PRODUCT_NAME} for display name
+Future<void> _updateInfoPlist() async {
+  final infoPlistFile = File('ios/Runner/Info.plist');
+  if (!infoPlistFile.existsSync()) {
+    print('⚠️ Info.plist not found, skipping update');
+    return;
+  }
+
+  var content = await infoPlistFile.readAsString();
+
+  // Check if CFBundleDisplayName already uses ${PRODUCT_NAME}
+  if (content.contains('<string>\${PRODUCT_NAME}</string>')) {
+    print('✅ Info.plist already uses \${PRODUCT_NAME}');
+    return;
+  }
+
+  // Replace hardcoded app name with ${PRODUCT_NAME}
+  content = content.replaceAllMapped(
+    RegExp(
+      r'<key>CFBundleDisplayName</key>\s*<string>[^<]*</string>',
+      multiLine: true,
+    ),
+    (match) =>
+        '<key>CFBundleDisplayName</key>\n\t<string>\${PRODUCT_NAME}</string>',
+  );
+
+  await infoPlistFile.writeAsString(content);
+  print('✅ Updated Info.plist to use \${PRODUCT_NAME}');
+}
+
+/// Updates product file references to use actual product names
+String _updateProductReferences(
+  String content,
+  List<String> flavors,
+  String appName,
+) {
+  // Get the product name for the first flavor
+  final firstFlavor = flavors.first;
+  final productName =
+      firstFlavor == 'prod' ? appName : '$appName ${firstFlavor.toUpperCase()}';
+
+  // Update the product file reference
+  content = content.replaceAllMapped(
+    RegExp(
+      r'([A-F0-9]{24} \/\* .*?\.app \*\/ = \{[^}]*path = ")[^"]+(")',
+      multiLine: true,
+    ),
+    (match) => '${match.group(1)}$productName.app${match.group(2)}',
+  );
+
+  // Also update in the Products group
+  content = content.replaceAllMapped(
+    RegExp(r'([A-F0-9]{24} \/\* )[^\.]+\.app( \*\/,)'),
+    (match) => '${match.group(1)}$productName.app${match.group(2)}',
+  );
+
+  print('✅ Updated product references to "$productName.app"');
+  return content;
+}
+
+/// Updates default configuration name to use first flavor
+String _updateDefaultConfigurationName(String content, List<String> flavors) {
+  final firstFlavor = flavors.first;
+
+  content = content.replaceAllMapped(
+    RegExp(r'defaultConfigurationName = [^;]+;'),
+    (match) => 'defaultConfigurationName = "Release-$firstFlavor";',
+  );
+
+  print('✅ Updated defaultConfigurationName to "Release-$firstFlavor"');
+  return content;
 }
 
 Future<void> _deleteMainDart() async {
