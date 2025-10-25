@@ -23,7 +23,16 @@ Future<void> main() async {
     print('❌ App name must not contain spaces. Exiting.');
     exit(0);
   }
+  // Get base bundle ID
+  stdout.write('Enter your base bundle ID (e.g. com.example.myapp): ');
+  String? baseBundleIdInput = stdin.readLineSync();
+  baseBundleIdInput = baseBundleIdInput?.trim();
+  if (baseBundleIdInput == null || baseBundleIdInput.trim().isEmpty) {
+    print('❌ No base bundle ID entered. Exiting.');
+    exit(0);
+  }
   final appName = appNameInput.trim();
+  final baseBundleId = baseBundleIdInput.trim();
   final appFileName = _toSnakeCase(appName);
 
   // Get flavors
@@ -43,7 +52,7 @@ Future<void> main() async {
 
   await _createEnvFiles(flavors);
   await _setupAndroid(flavors, appName);
-  await _setupIOS(flavors, appName);
+  await _setupIOS(flavors, appName, baseBundleId);
   await _deleteMainDart();
   await _splitAndCreateAppFile(appName, appFileName);
   await _createDartEntryFiles(flavors, appName, appFileName);
@@ -173,7 +182,11 @@ ${flavors.map((f) => '''
   }
 }
 
-Future<void> _setupIOS(List<String> flavors, String appName) async {
+Future<void> _setupIOS(
+  List<String> flavors,
+  String appName,
+  String baseBundleId,
+) async {
   print('\n🍎 Configuring iOS flavors...');
 
   final schemesDir = Directory('ios/Runner.xcodeproj/xcshareddata/xcschemes');
@@ -217,21 +230,44 @@ Future<void> _setupIOS(List<String> flavors, String appName) async {
     print('⚠️ Using fallback Runner target ID');
   }
 
-  // Find existing configuration IDs
-  final debugConfigMatch = RegExp(
-    r'([A-F0-9]{24}) \/\* Debug \*\/ = \{',
-  ).firstMatch(pbxContent);
-  final releaseConfigMatch = RegExp(
-    r'([A-F0-9]{24}) \/\* Release \*\/ = \{',
-  ).firstMatch(pbxContent);
-  final profileConfigMatch = RegExp(
-    r'([A-F0-9]{24}) \/\* Profile \*\/ = \{',
+  // Find Runner target's buildConfigurationList
+  final runnerConfigListMatch = RegExp(
+    r'buildConfigurationList = ([A-F0-9]{24}) \/\* Build configuration list for PBXNativeTarget "Runner" \*\/',
   ).firstMatch(pbxContent);
 
-  if (debugConfigMatch == null || releaseConfigMatch == null) {
-    print('❌ Could not find Debug/Release configurations');
+  if (runnerConfigListMatch == null) {
+    print('❌ Could not find Runner target buildConfigurationList');
     return;
   }
+
+  final runnerConfigListId = runnerConfigListMatch.group(1)!;
+  print('✅ Found Runner buildConfigurationList ID: $runnerConfigListId');
+
+  // Find the Runner target's configuration IDs from its buildConfigurationList
+  final configListPattern = RegExp(
+    runnerConfigListId +
+        r' \/\* Build configuration list for PBXNativeTarget "Runner" \*\/ = \{[^}]*buildConfigurations = \(\s*([A-F0-9]{24}) \/\* Debug \*\/,\s*([A-F0-9]{24}) \/\* Release \*\/,\s*([A-F0-9]{24}) \/\* Profile \*\/',
+    multiLine: true,
+    dotAll: true,
+  );
+
+  final configListMatch = configListPattern.firstMatch(pbxContent);
+  if (configListMatch == null) {
+    print('❌ Could not find Runner target configurations');
+    return;
+  }
+
+  final debugConfigId = configListMatch.group(1)!;
+  final releaseConfigId = configListMatch.group(2)!;
+  final profileConfigId = configListMatch.group(3)!;
+
+  print('✅ Found Runner configurations:');
+  print('   Debug: $debugConfigId');
+  print('   Release: $releaseConfigId');
+  print('   Profile: $profileConfigId');
+
+  // First, remove any existing flavor configurations to avoid duplicates
+  pbxContent = _removeFlavorConfigurations(pbxContent, flavors);
 
   // Generate new configuration IDs and add them
   final configsToAdd = <String, Map<String, String>>{};
@@ -240,24 +276,25 @@ Future<void> _setupIOS(List<String> flavors, String appName) async {
     configsToAdd['Debug-$flavor'] = {
       'id': _generateXcodeId(),
       'base': 'Debug',
-      'baseId': debugConfigMatch.group(1)!,
-      'xcconfig': 'Debug-$flavor.xcconfig',
+      'baseId': debugConfigId,
+      'xcconfig': 'Debug.xcconfig',
     };
     configsToAdd['Release-$flavor'] = {
       'id': _generateXcodeId(),
       'base': 'Release',
-      'baseId': releaseConfigMatch.group(1)!,
-      'xcconfig': 'Release-$flavor.xcconfig',
+      'baseId': releaseConfigId,
+      'xcconfig': 'Release.xcconfig',
     };
-    if (profileConfigMatch != null) {
-      configsToAdd['Profile-$flavor'] = {
-        'id': _generateXcodeId(),
-        'base': 'Profile',
-        'baseId': profileConfigMatch.group(1)!,
-        'xcconfig': 'Profile-$flavor.xcconfig',
-      };
-    }
+    configsToAdd['Profile-$flavor'] = {
+      'id': _generateXcodeId(),
+      'base': 'Profile',
+      'baseId': profileConfigId,
+      'xcconfig': 'Profile.xcconfig',
+    };
   }
+
+  // Ensure base xcconfig files exist
+  _ensureBaseXcconfigFilesExist();
 
   // Add build configurations to XCConfigurationList
   pbxContent = _addBuildConfigurationsToPbxproj(pbxContent, configsToAdd);
@@ -265,53 +302,29 @@ Future<void> _setupIOS(List<String> flavors, String appName) async {
   // Associate xcconfig files with configurations
   pbxContent = _associateXcconfigFiles(pbxContent, configsToAdd);
 
+  // Add flavor-specific build settings to each configuration
+  pbxContent = _addFlavorSpecificBuildSettings(
+    pbxContent,
+    configsToAdd,
+    flavors,
+    appName,
+    baseBundleId,
+  );
+
   await pbxprojFile.writeAsString(pbxContent);
   print('✅ Updated project.pbxproj with build configurations');
 
   for (final flavor in flavors) {
-    // Create flavor-specific configuration in xcconfig files
-    final debugConfigDir = Directory('ios/Flutter');
-    debugConfigDir.createSync(recursive: true);
-
-    final debugConfig = File('ios/Flutter/Debug-$flavor.xcconfig');
-    if (!debugConfig.existsSync()) {
-      debugConfig.writeAsStringSync('''
-#include "Generated.xcconfig"
-PRODUCT_BUNDLE_IDENTIFIER = com.example.myapp${flavor != 'prod' ? '.$flavor' : ''}
-PRODUCT_NAME = $appName${flavor != 'prod' ? ' ${flavor.toUpperCase()}' : ''}
-ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
-''');
-      print('✅ Created Debug-$flavor.xcconfig');
-    }
-
-    final releaseConfig = File('ios/Flutter/Release-$flavor.xcconfig');
-    if (!releaseConfig.existsSync()) {
-      releaseConfig.writeAsStringSync('''
-#include "Generated.xcconfig"
-PRODUCT_BUNDLE_IDENTIFIER = com.example.myapp${flavor != 'prod' ? '.$flavor' : ''}
-PRODUCT_NAME = $appName${flavor != 'prod' ? ' ${flavor.toUpperCase()}' : ''}
-ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
-''');
-      print('✅ Created Release-$flavor.xcconfig');
-    }
-
-    final profileConfig = File('ios/Flutter/Profile-$flavor.xcconfig');
-    if (!profileConfig.existsSync()) {
-      profileConfig.writeAsStringSync('''
-#include "Generated.xcconfig"
-PRODUCT_BUNDLE_IDENTIFIER = com.example.myapp${flavor != 'prod' ? '.$flavor' : ''}
-PRODUCT_NAME = $appName${flavor != 'prod' ? ' ${flavor.toUpperCase()}' : ''}
-ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
-''');
-      print('✅ Created Profile-$flavor.xcconfig');
-    }
+    print('✅ Configured build settings for $flavor flavor');
 
     // Create Xcode scheme with just the flavor name
     final scheme = File('${schemesDir.path}/$flavor.xcscheme');
 
     // Skip creating prod.xcscheme if it was converted from Runner.xcscheme
+    // But we still need to update it to use flavor-specific configurations
     if (flavor == 'prod' && prodScheme.existsSync()) {
       print('✅ Using converted prod.xcscheme (from Runner.xcscheme)');
+      _updateSchemeConfigurations(prodScheme, flavor);
       continue;
     }
 
@@ -399,6 +412,8 @@ ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
       print('✅ Created Xcode scheme: $flavor.xcscheme');
     } else {
       print('⚠️ Xcode scheme $flavor.xcscheme already exists, skipped');
+      // Still update it to ensure it uses the correct configurations
+      _updateSchemeConfigurations(scheme, flavor);
     }
   }
 
@@ -406,11 +421,153 @@ ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
   print('   Run: flutter run --flavor dev -t lib/main_dev.dart');
 }
 
+// Counter to ensure unique IDs
+int _idCounter = 0;
+
 String _generateXcodeId() {
-  final random =
-      DateTime.now().millisecondsSinceEpoch.toRadixString(16).toUpperCase();
-  final padding = '0' * (24 - random.length);
-  return '$padding$random';
+  final timestamp = DateTime.now().millisecondsSinceEpoch;
+  final uniqueValue = (timestamp + _idCounter).toRadixString(16).toUpperCase();
+  _idCounter++; // Increment counter for next call
+  final padding = '0' * (24 - uniqueValue.length);
+  return '$padding$uniqueValue';
+}
+
+/// Ensures base xcconfig files (Debug, Release, Profile) exist
+void _ensureBaseXcconfigFilesExist() {
+  final flutterDir = Directory('ios/Flutter');
+  if (!flutterDir.existsSync()) {
+    flutterDir.createSync(recursive: true);
+  }
+
+  // Create Debug.xcconfig if it doesn't exist
+  final debugConfig = File('ios/Flutter/Debug.xcconfig');
+  if (!debugConfig.existsSync()) {
+    debugConfig.writeAsStringSync('#include "Generated.xcconfig"\n');
+    print('✅ Created Debug.xcconfig');
+  }
+
+  // Create Release.xcconfig if it doesn't exist
+  final releaseConfig = File('ios/Flutter/Release.xcconfig');
+  if (!releaseConfig.existsSync()) {
+    releaseConfig.writeAsStringSync('#include "Generated.xcconfig"\n');
+    print('✅ Created Release.xcconfig');
+  }
+
+  // Create Profile.xcconfig if it doesn't exist
+  final profileConfig = File('ios/Flutter/Profile.xcconfig');
+  if (!profileConfig.existsSync()) {
+    profileConfig.writeAsStringSync('#include "Generated.xcconfig"\n');
+    print('✅ Created Profile.xcconfig');
+  }
+}
+
+/// Adds flavor-specific build settings (bundle ID, app name) to configurations
+String _addFlavorSpecificBuildSettings(
+  String content,
+  Map<String, Map<String, String>> configs,
+  List<String> flavors,
+  String appName,
+  String baseBundleId,
+) {
+  for (final flavor in flavors) {
+    final bundleId = flavor == 'prod' ? baseBundleId : '$baseBundleId.$flavor';
+    final productName =
+        flavor == 'prod' ? appName : '$appName ${flavor.toUpperCase()}';
+
+    // Update each configuration type (Debug, Release, Profile)
+    for (final type in ['Debug', 'Release', 'Profile']) {
+      final configName = '$type-$flavor';
+      final configId = configs[configName]?['id'];
+
+      if (configId == null) continue;
+
+      // Find the buildSettings section for this configuration
+      final configPattern = RegExp(
+        '$configId \\/\\* $configName \\*\\/ = \\{[^}]*buildSettings = \\{([^}]*)\\};',
+        multiLine: true,
+        dotAll: true,
+      );
+
+      final configMatch = configPattern.firstMatch(content);
+      if (configMatch == null) continue;
+
+      var buildSettings = configMatch.group(1)!;
+
+      // Update or add PRODUCT_BUNDLE_IDENTIFIER
+      if (buildSettings.contains('PRODUCT_BUNDLE_IDENTIFIER')) {
+        buildSettings = buildSettings.replaceAllMapped(
+          RegExp(r'PRODUCT_BUNDLE_IDENTIFIER = [^;]+;'),
+          (match) => 'PRODUCT_BUNDLE_IDENTIFIER = $bundleId;',
+        );
+      } else {
+        buildSettings += '\n\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = $bundleId;';
+      }
+
+      // Update or add PRODUCT_NAME
+      if (buildSettings.contains('PRODUCT_NAME')) {
+        buildSettings = buildSettings.replaceAllMapped(
+          RegExp(r'PRODUCT_NAME = [^;]+;'),
+          (match) => 'PRODUCT_NAME = "$productName";',
+        );
+      } else {
+        buildSettings += '\n\t\t\t\tPRODUCT_NAME = "$productName";';
+      }
+
+      // Add SDKROOT if not present
+      if (!buildSettings.contains('SDKROOT')) {
+        buildSettings += '\n\t\t\t\tSDKROOT = iphoneos;';
+      }
+
+      // Add IPHONEOS_DEPLOYMENT_TARGET if not present
+      if (!buildSettings.contains('IPHONEOS_DEPLOYMENT_TARGET')) {
+        buildSettings += '\n\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 12.0;';
+      }
+
+      // Add TARGETED_DEVICE_FAMILY if not present
+      if (!buildSettings.contains('TARGETED_DEVICE_FAMILY')) {
+        buildSettings += '\n\t\t\t\tTARGETED_DEVICE_FAMILY = "1,2";';
+      }
+
+      // Replace the entire configuration with updated buildSettings
+      content = content.replaceFirst(
+        configPattern,
+        '$configId /* $configName */ = {[^}]*buildSettings = {$buildSettings};',
+      );
+    }
+  }
+
+  return content;
+}
+
+/// Removes existing flavor configurations from project.pbxproj to avoid duplicates
+String _removeFlavorConfigurations(String content, List<String> flavors) {
+  for (final flavor in flavors) {
+    // Remove configuration definitions from XCBuildConfiguration section
+    for (final type in ['Debug', 'Release', 'Profile']) {
+      final configName = '$type-$flavor';
+
+      // Remove the full configuration block
+      // Pattern: ID /* ConfigName */ = { ... };
+      final configBlockPattern = RegExp(
+        r'[A-F0-9]{24} \/\* ' +
+            RegExp.escape(configName) +
+            r' \*\/ = \{[^}]*(?:baseConfigurationReference[^;]*;)?[^}]*buildSettings = \{[^}]*\};[^}]*\};',
+        multiLine: true,
+        dotAll: true,
+      );
+      content = content.replaceAll(configBlockPattern, '');
+
+      // Remove references from buildConfigurations lists
+      // Pattern: ID /* ConfigName */,
+      final refPattern = RegExp(
+        r'\s*[A-F0-9]{24} \/\* ' + RegExp.escape(configName) + r' \*\/,\s*',
+        multiLine: true,
+      );
+      content = content.replaceAll(refPattern, '');
+    }
+  }
+
+  return content;
 }
 
 String _addBuildConfigurationsToPbxproj(
@@ -442,9 +599,11 @@ String _addBuildConfigurationsToPbxproj(
       continue; // Already exists
     }
 
-    // Find a sample config to copy structure from
+    // Use the specific base configuration ID to copy from the Runner target's config
+    final baseConfigId = configData['baseId']!;
     final sampleConfigMatch = RegExp(
-      r'([A-F0-9]{24}) \/\* ' +
+      baseConfigId +
+          r' \/\* ' +
           configData['base']! +
           r' \*\/ = \{[^}]*buildSettings = \{[^}]*\};[^}]*\};',
       multiLine: true,
@@ -453,14 +612,14 @@ String _addBuildConfigurationsToPbxproj(
 
     if (sampleConfigMatch != null) {
       var newConfig = sampleConfigMatch.group(0)!;
+      // Replace the ID with the new configuration ID
+      newConfig = newConfig.replaceFirst(baseConfigId, configData['id']!);
+      // Replace the configuration name in the comment
       newConfig = newConfig.replaceFirst(
-        RegExp(r'([A-F0-9]{24})'),
-        configData['id']!,
-      );
-      newConfig = newConfig.replaceAll(
         '/* ${configData['base']} */',
         '/* $configName */',
       );
+      // Replace the name property
       newConfig = newConfig.replaceFirstMapped(
         RegExp(r'name = [^;]+;'),
         (match) => 'name = $configName;',
@@ -499,36 +658,54 @@ String _associateXcconfigFiles(
   String content,
   Map<String, Map<String, String>> configs,
 ) {
-  for (final entry in configs.entries) {
-    final configName = entry.key;
-    final configData = entry.value;
-    final xcconfigFile = configData['xcconfig']!;
+  // Since we're copying from base configurations that already have
+  // baseConfigurationReference set, we don't need to add it again.
+  // The copied configurations already reference the correct xcconfig files.
+  return content;
+}
 
-    // Find the configuration block and add baseConfigurationReference
-    final configBlockPattern = RegExp(
-      '${configData['id']} \\/\\* $configName \\*\\/ = \\{[^}]*buildSettings = \\{',
-      multiLine: true,
-    );
-
-    final configMatch = configBlockPattern.firstMatch(content);
-    if (configMatch != null) {
-      // Check if baseConfigurationReference already exists
-      final endOfMatch = configMatch.end;
-      final afterMatch = content.substring(endOfMatch, endOfMatch + 500);
-
-      if (!afterMatch.contains('baseConfigurationReference')) {
-        // Add baseConfigurationReference before buildSettings
-        final insertPoint = configMatch.end - 'buildSettings = {'.length;
-        final before = content.substring(0, insertPoint);
-        final after = content.substring(insertPoint);
-
-        content =
-            '${before}baseConfigurationReference = ${_generateXcodeId()} /* $xcconfigFile */;\n\t\t\t$after';
-      }
-    }
+/// Updates scheme file to use flavor-specific build configurations
+void _updateSchemeConfigurations(File schemeFile, String flavor) {
+  if (!schemeFile.existsSync()) {
+    print('⚠️ Scheme file ${schemeFile.path} does not exist');
+    return;
   }
 
-  return content;
+  var content = schemeFile.readAsStringSync();
+  var originalContent = content;
+
+  // Replace all generic configuration references with flavor-specific ones
+  // Use word boundaries to avoid replacing already-updated configurations
+
+  // Update Debug configurations (but not Debug-{otherflavor})
+  content = content.replaceAllMapped(
+    RegExp(r'buildConfiguration = "Debug"(?!-)'),
+    (match) => 'buildConfiguration = "Debug-$flavor"',
+  );
+
+  // Update Profile configurations (but not Profile-{otherflavor})
+  content = content.replaceAllMapped(
+    RegExp(r'buildConfiguration = "Profile"(?!-)'),
+    (match) => 'buildConfiguration = "Profile-$flavor"',
+  );
+
+  // Update Release configurations (but not Release-{otherflavor})
+  content = content.replaceAllMapped(
+    RegExp(r'buildConfiguration = "Release"(?!-)'),
+    (match) => 'buildConfiguration = "Release-$flavor"',
+  );
+
+  // Check if any changes were made
+  if (content != originalContent) {
+    schemeFile.writeAsStringSync(content);
+    print(
+      '✅ Updated ${schemeFile.path.split('/').last} to use $flavor-specific configurations',
+    );
+  } else {
+    print(
+      '✅ ${schemeFile.path.split('/').last} already uses $flavor-specific configurations',
+    );
+  }
 }
 
 Future<void> _splitAndCreateAppFile(String appName, String appFileName) async {
