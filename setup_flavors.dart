@@ -24,13 +24,22 @@ Future<void> main() async {
     exit(0);
   }
   // Get base bundle ID
-  stdout.write('Enter your base bundle ID (e.g. com.example.myapp): ');
+  stdout.write('Enter your (iOS) base bundle ID (e.g. com.example.myapp): ');
   String? baseBundleIdInput = stdin.readLineSync();
   baseBundleIdInput = baseBundleIdInput?.trim();
   if (baseBundleIdInput == null || baseBundleIdInput.trim().isEmpty) {
     print('❌ No base bundle ID entered. Exiting.');
     exit(0);
   }
+  stdout.write('Enter your (Android) package name (e.g. com.example.myapp): ');
+  String? androidPackageNameInput = stdin.readLineSync();
+  androidPackageNameInput = androidPackageNameInput?.trim();
+  if (androidPackageNameInput == null ||
+      androidPackageNameInput.trim().isEmpty) {
+    print('❌ No android package name entered. Exiting.');
+    exit(0);
+  }
+  final androidPackageName = androidPackageNameInput.trim();
   final appName = appNameInput.trim();
   final baseBundleId = baseBundleIdInput.trim();
   final appFileName = _toSnakeCase(appName);
@@ -51,12 +60,16 @@ Future<void> main() async {
   print('📄 App File: lib/$appFileName.dart\n');
 
   await _createEnvFiles(flavors);
-  await _setupAndroid(flavors, appName);
+  await _setupAndroid(flavors, appName, androidPackageName);
+  await _setupIOSPodfile();
   await _setupIOS(flavors, appName, baseBundleId);
   await _deleteMainDart();
   await _splitAndCreateAppFile(appName, appFileName);
   await _createDartEntryFiles(flavors, appName, appFileName);
   await _updateWidgetTest(appName, appFileName);
+  await _podInstallIos();
+  await _flutterClean();
+  await _flutterPubGet();
   await _createVSCodeLaunchConfig(flavors, appName);
 
   print('\n✅ All done! Flavors setup complete 🎉');
@@ -109,7 +122,11 @@ Future<void> _createEnvFiles(List<String> flavors) async {
   }
 }
 
-Future<void> _setupAndroid(List<String> flavors, String appName) async {
+Future<void> _setupAndroid(
+  List<String> flavors,
+  String appName,
+  String androidPackageName,
+) async {
   print('\n🤖 Configuring Android flavors...');
 
   final gradleFile = File('android/app/build.gradle');
@@ -124,6 +141,45 @@ Future<void> _setupAndroid(List<String> flavors, String appName) async {
   }
 
   var content = await targetFile.readAsString();
+
+  // Search and replace applicationId
+  if (content.contains('applicationId')) {
+    final applicationIdPattern =
+        isKts
+            ? RegExp(r'applicationId\s*=\s*"[^"]*"')
+            : RegExp(r'applicationId\s+"[^"]*"');
+
+    if (applicationIdPattern.hasMatch(content)) {
+      content = content.replaceAll(
+        applicationIdPattern,
+        isKts
+            ? 'applicationId = "$androidPackageName"'
+            : 'applicationId "$androidPackageName"',
+      );
+      print('✅ Replaced applicationId with: $androidPackageName');
+    }
+  }
+
+  // Search and replace namespace
+  if (content.contains('namespace')) {
+    final namespacePattern =
+        isKts
+            ? RegExp(r'namespace\s*=\s*"[^"]*"')
+            : RegExp(r'namespace\s+"[^"]*"');
+
+    if (namespacePattern.hasMatch(content)) {
+      content = content.replaceAll(
+        namespacePattern,
+        isKts
+            ? 'namespace = "$androidPackageName"'
+            : 'namespace "$androidPackageName"',
+      );
+      print('✅ Replaced namespace with: $androidPackageName');
+    }
+  }
+
+  // Write the updated content
+  await targetFile.writeAsString(content);
 
   if (content.contains('productFlavors')) {
     print('⚠️ Android flavors already configured in ${targetFile.path}');
@@ -179,6 +235,43 @@ ${flavors.map((f) => '''
     } else {
       print('⚠️ AndroidManifest.xml already uses @string/app_name');
     }
+  }
+}
+
+Future<void> _setupIOSPodfile() async {
+  print('\n📦 Checking iOS Podfile...');
+
+  final podfile = File('ios/Podfile');
+  if (!podfile.existsSync()) {
+    print('⚠️ Podfile not found at ios/Podfile');
+    return;
+  }
+
+  var content = await podfile.readAsString();
+
+  // Check if use_modular_headers! is already present
+  if (content.contains('use_modular_headers!')) {
+    print('✅ Podfile already contains use_modular_headers!');
+    return;
+  }
+
+  // Find the target 'Runner' block and add use_modular_headers! inside it
+  final targetPattern = RegExp(
+    r"^\s*target\s+[\x27\x22]Runner[\x27\x22]\s+do\s*$",
+    multiLine: true,
+  );
+
+  final match = targetPattern.firstMatch(content);
+  if (match != null) {
+    // Insert use_modular_headers! on the next line after "target 'Runner' do"
+    final insertPosition = match.end;
+    content =
+        '${content.substring(0, insertPosition)}\n  use_modular_headers!${content.substring(insertPosition)}';
+
+    await podfile.writeAsString(content);
+    print('✅ Added use_modular_headers! to Podfile');
+  } else {
+    print('⚠️ Could not find target Runner block in Podfile');
   }
 }
 
@@ -484,16 +577,23 @@ String _addFlavorSpecificBuildSettings(
 
       if (configId == null) continue;
 
-      // Find the buildSettings section for this configuration
+      // Find the entire configuration block
       final configPattern = RegExp(
-        '$configId \\/\\* $configName \\*\\/ = \\{[^}]*buildSettings = \\{([^}]*)\\};',
+        configId +
+            r' /\* ' +
+            RegExp.escape(configName) +
+            r' \*/ = \{[^}]*isa = XCBuildConfiguration;[^}]*baseConfigurationReference[^;]*;[^}]*buildSettings = \{([^}]*)\};[^}]*\};',
         multiLine: true,
         dotAll: true,
       );
 
       final configMatch = configPattern.firstMatch(content);
-      if (configMatch == null) continue;
+      if (configMatch == null) {
+        print('⚠️  Could not find configuration block for $configName');
+        continue;
+      }
 
+      final fullMatch = configMatch.group(0)!;
       var buildSettings = configMatch.group(1)!;
 
       // Update or add PRODUCT_BUNDLE_IDENTIFIER
@@ -531,11 +631,25 @@ String _addFlavorSpecificBuildSettings(
         buildSettings += '\n\t\t\t\tTARGETED_DEVICE_FAMILY = "1,2";';
       }
 
-      // Replace the entire configuration with updated buildSettings
-      content = content.replaceFirst(
-        configPattern,
-        '$configId /* $configName */ = {[^}]*buildSettings = {$buildSettings};',
-      );
+      // Extract the baseConfigurationReference from the matched configuration
+      final baseConfigRefMatch = RegExp(
+        r'baseConfigurationReference = ([A-F0-9]{24}) /\* ([^*]+) \*/',
+      ).firstMatch(fullMatch);
+
+      final baseConfigRef = baseConfigRefMatch?.group(1) ?? '';
+      final xcconfigComment =
+          baseConfigRefMatch?.group(2) ?? configs[configName]?['xcconfig'];
+
+      final newConfigBlock = '''$configId /* $configName */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = $baseConfigRef /* $xcconfigComment */;
+			buildSettings = {$buildSettings
+			};
+			name = $configName;
+		};''';
+
+      // Replace the old configuration block with the new one
+      content = content.replaceFirst(fullMatch, newConfigBlock);
     }
   }
 
@@ -1031,4 +1145,40 @@ Future<void> _deleteMainDart() async {
 
   await mainFile.delete();
   print('✅ Deleted lib/main.dart');
+}
+
+Future<void> _podInstallIos() async {
+  print('\n📦 Running pod install...');
+  final result = await Process.run('pod', ['install'], workingDirectory: 'ios');
+  print(result.stdout);
+  print(result.stderr);
+  if (result.exitCode != 0) {
+    print('❌ pod install failed');
+    exit(1);
+  }
+  print('✅ pod install completed');
+}
+
+Future<void> _flutterClean() async {
+  print('\n📦 Running flutter clean');
+  final result = await Process.run('flutter', ['clean']);
+  print(result.stdout);
+  print(result.stderr);
+  if (result.exitCode != 0) {
+    print('❌ flutter clean failed');
+    exit(1);
+  }
+  print('✅ flutter clean completed');
+}
+
+Future<void> _flutterPubGet() async {
+  print('\n📦 Running pub get...');
+  final result = await Process.run('flutter', ['pub', 'get']);
+  print(result.stdout);
+  print(result.stderr);
+  if (result.exitCode != 0) {
+    print('❌ pub get failed');
+    exit(1);
+  }
+  print('✅ pub get completed');
 }
