@@ -16,11 +16,8 @@ Future<void> main() async {
   } else if (!appNameInput.startsWith(RegExp(r'[a-zA-Z]'))) {
     print('❌ App name must start with a letter. Exiting.');
     exit(0);
-  } else if (appNameInput.contains(RegExp(r'[^a-zA-Z0-9]'))) {
-    print('❌ App name must contain only letters and numbers. Exiting.');
-    exit(0);
-  } else if (appNameInput.contains(RegExp(r'\s'))) {
-    print('❌ App name must not contain spaces. Exiting.');
+  } else if (appNameInput.contains(RegExp(r'[^a-zA-Z0-9 ]'))) {
+    print('❌ App name can only contain letters, numbers and spaces. Exiting.');
     exit(0);
   }
   // Get base bundle ID
@@ -31,6 +28,7 @@ Future<void> main() async {
     print('❌ No base bundle ID entered. Exiting.');
     exit(0);
   }
+
   stdout.write('Enter your (Android) package name (e.g. com.example.myapp): ');
   String? androidPackageNameInput = stdin.readLineSync();
   androidPackageNameInput = androidPackageNameInput?.trim();
@@ -40,8 +38,8 @@ Future<void> main() async {
     exit(0);
   }
   final androidPackageName = androidPackageNameInput.trim();
-  final appName = appNameInput.trim();
   final baseBundleId = baseBundleIdInput.trim();
+  final appName = appNameInput.trim();
   final appFileName = _toSnakeCase(appName);
 
   // Get flavors
@@ -54,6 +52,7 @@ Future<void> main() async {
 
   final flavors =
       input.split(',').map((f) => f.trim()).where((f) => f.isNotEmpty).toList();
+  await _checkIfFlavorAlreadyExists(flavors);
 
   print('\n🚀 Starting flavor setup for: ${flavors.join(', ')}');
   print('📱 App Name: $appName');
@@ -64,9 +63,13 @@ Future<void> main() async {
   await _setupIOSPodfile();
   await _setupIOS(flavors, appName, baseBundleId);
   await _deleteMainDart();
-  await _splitAndCreateAppFile(appName, appFileName);
-  await _createDartEntryFiles(flavors, appName, appFileName);
-  await _updateWidgetTest(appName, appFileName);
+  await _splitAndCreateAppFile(appName.replaceAll(' ', ''), appFileName);
+  await _createDartEntryFiles(
+    flavors,
+    appName.replaceAll(' ', ''),
+    appFileName,
+  );
+  await _updateWidgetTest(appName.replaceAll(' ', ''), appFileName);
   await _podInstallIos();
   await _flutterClean();
   await _flutterPubGet();
@@ -181,9 +184,88 @@ Future<void> _setupAndroid(
   // Write the updated content
   await targetFile.writeAsString(content);
 
+  // Check if productFlavors block exists
   if (content.contains('productFlavors')) {
-    print('⚠️ Android flavors already configured in ${targetFile.path}');
+    print('⚠️ Android flavors already configured. Adding new flavors...');
+
+    // Find the productFlavors block
+    final productFlavorsPattern =
+        isKts
+            ? RegExp(
+              r'productFlavors\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}',
+              multiLine: true,
+              dotAll: true,
+            )
+            : RegExp(
+              r'productFlavors\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}',
+              multiLine: true,
+              dotAll: true,
+            );
+
+    final match = productFlavorsPattern.firstMatch(content);
+
+    if (match != null) {
+      var existingFlavorsBlock = match.group(1)!;
+      final fullMatch = match.group(0)!;
+
+      // Filter out flavors that already exist in the block
+      final newFlavors =
+          flavors.where((f) {
+            final flavorExists =
+                isKts
+                    ? existingFlavorsBlock.contains('create("$f")')
+                    : existingFlavorsBlock.contains('$f {');
+
+            if (flavorExists) {
+              print('⚠️ Flavor "$f" already exists, skipping');
+            }
+            return !flavorExists;
+          }).toList();
+
+      if (newFlavors.isEmpty) {
+        print('✅ No new flavors to add');
+        return;
+      }
+
+      // Generate new flavor definitions
+      final newFlavorDefinitions =
+          isKts
+              ? newFlavors
+                  .map(
+                    (f) => '''
+        create("$f") {
+            dimension = "default"
+            ${f != 'prod' ? 'applicationIdSuffix = ".$f"' : ''}
+            resValue("string", "app_name", "$appName${f != 'prod' ? ' ${f.toUpperCase()}' : ''}")
+        }''',
+                  )
+                  .join('\n')
+              : newFlavors
+                  .map(
+                    (f) => '''
+        $f {
+            dimension "default"
+            ${f != 'prod' ? 'applicationIdSuffix ".$f"' : ''}
+            resValue "string", "app_name", "$appName${f != 'prod' ? ' ${f.toUpperCase()}' : ''}"
+        }''',
+                  )
+                  .join('\n');
+
+      // Append new flavors to the existing block
+      final updatedFlavorsBlock =
+          '${existingFlavorsBlock.trimRight()}\n$newFlavorDefinitions\n    ';
+
+      // Replace the old productFlavors block with the updated one
+      content = content.replaceFirst(
+        fullMatch,
+        'productFlavors {$updatedFlavorsBlock}',
+      );
+
+      await targetFile.writeAsString(content);
+      print('✅ Added new flavors: ${newFlavors.join(', ')}');
+    }
   } else {
+    // No productFlavors block exists, create it with all flavors
     final flavorBlock =
         isKts
             ? '''
@@ -600,10 +682,10 @@ String _addFlavorSpecificBuildSettings(
       if (buildSettings.contains('PRODUCT_BUNDLE_IDENTIFIER')) {
         buildSettings = buildSettings.replaceAllMapped(
           RegExp(r'PRODUCT_BUNDLE_IDENTIFIER = [^;]+;'),
-          (match) => 'PRODUCT_BUNDLE_IDENTIFIER = $bundleId;',
+          (match) => 'PRODUCT_BUNDLE_IDENTIFIER = "$bundleId";',
         );
       } else {
-        buildSettings += '\n\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = $bundleId;';
+        buildSettings += '\n\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = "$bundleId";';
       }
 
       // Update or add PRODUCT_NAME
@@ -1181,4 +1263,326 @@ Future<void> _flutterPubGet() async {
     exit(1);
   }
   print('✅ pub get completed');
+}
+
+Future<void> _checkIfFlavorAlreadyExists(List<String> flavors) async {
+  if (flavors.isNotEmpty) {
+    final existingFlavors = <String>[];
+
+    final gradleFile = File('android/app/build.gradle');
+    final gradleKtsFile = File('android/app/build.gradle.kts');
+    final androidFile = gradleKtsFile.existsSync() ? gradleKtsFile : gradleFile;
+
+    if (androidFile.existsSync()) {
+      final androidContent = await androidFile.readAsString();
+      for (final flavor in flavors) {
+        if (androidContent.contains('create("$flavor")') ||
+            androidContent.contains('$flavor {')) {
+          if (!existingFlavors.contains(flavor)) {
+            existingFlavors.add(flavor);
+          }
+        }
+      }
+    }
+
+    // Check iOS schemes
+    final schemesDir = Directory('ios/Runner.xcodeproj/xcshareddata/xcschemes');
+    if (schemesDir.existsSync()) {
+      for (final flavor in flavors) {
+        final schemeFile = File('${schemesDir.path}/$flavor.xcscheme');
+        if (schemeFile.existsSync() && !existingFlavors.contains(flavor)) {
+          existingFlavors.add(flavor);
+        }
+      }
+    }
+    for (final flavor in flavors) {
+      final mainFile = File('lib/main_$flavor.dart');
+      if (mainFile.existsSync() && !existingFlavors.contains(flavor)) {
+        existingFlavors.add(flavor);
+      }
+    }
+    if (existingFlavors.isNotEmpty) {
+      print('\n⚠️  Warning: The following flavor(s) already exist:');
+      for (final flavor in existingFlavors) {
+        print('   • $flavor');
+      }
+
+      // Show which flavors are new
+      final newFlavors =
+          flavors.where((f) => !existingFlavors.contains(f)).toList();
+      if (newFlavors.isNotEmpty) {
+        print('\n✨ New flavor(s) to be added:');
+        for (final flavor in newFlavors) {
+          print('   • $flavor');
+        }
+      }
+
+      // Show which existing flavors are also in the input
+      final commonFlavors =
+          flavors.where((f) => existingFlavors.contains(f)).toList();
+      if (commonFlavors.isNotEmpty) {
+        print('\n🔄 Flavor(s) that are both existing and in your input:');
+        for (final flavor in commonFlavors) {
+          print('   • $flavor');
+        }
+      }
+
+      print('\nOptions:');
+      print(
+        '1. Skip existing flavors (only add new ones: ${newFlavors.join(', ')})',
+      );
+      print(
+        '2. Recreate common flavors (recreate: ${commonFlavors.join(', ')}, add new: ${newFlavors.join(', ')})',
+      );
+      print('3. Cancel setup');
+      stdout.write('\nEnter your choice (1/2/3): ');
+
+      final response = stdin.readLineSync()?.trim();
+
+      if (response == '3') {
+        print('❌ Setup cancelled by user.');
+        exit(0);
+      } else if (response == '1') {
+        // Remove existing flavors from the list
+        flavors.removeWhere((f) => existingFlavors.contains(f));
+        if (flavors.isEmpty) {
+          print('❌ No new flavors to add. Exiting.');
+          exit(0);
+        }
+        print('✅ Will only setup new flavors: ${flavors.join(', ')}');
+      } else if (response == '2') {
+        if (commonFlavors.isEmpty) {
+          print(
+            '⚠️  No common flavors to recreate. Will only add new flavors.',
+          );
+        } else {
+          print('✅ Will recreate: ${commonFlavors.join(', ')}');
+          print('✅ Will add new: ${newFlavors.join(', ')}');
+          print(
+            '🗑️  Removing configurations for: ${commonFlavors.join(', ')}...\n',
+          );
+
+          // Only remove the common flavors
+          await _removeExistingFlavors(commonFlavors);
+
+          print('✅ Removed configurations. Proceeding with setup...\n');
+        }
+        // flavors list stays as-is (contains both common and new)
+      } else {
+        print('❌ Invalid choice. Exiting.');
+        exit(0);
+      }
+    }
+  }
+}
+
+Future<void> _removeExistingFlavors(List<String> flavorsToRemove) async {
+  print('🗑️  Removing existing flavor configurations...');
+
+  // 1. Remove Android flavor configurations
+  await _removeAndroidFlavors(flavorsToRemove);
+
+  // 2. Remove iOS schemes
+  await _removeIOSSchemes(flavorsToRemove);
+
+  // 3. Remove iOS configurations from project.pbxproj
+  await _removeIOSConfigurations(flavorsToRemove);
+
+  // 4. Remove main_*.dart files
+  await _removeDartEntryFiles(flavorsToRemove);
+
+  // 5. Remove .env files
+  await _removeEnvFiles(flavorsToRemove);
+
+  print('✅ All existing flavor configurations removed\n');
+}
+
+Future<void> _removeAndroidFlavors(List<String> flavorsToRemove) async {
+  print('  🤖 Removing Android flavors...');
+
+  final gradleFile = File('android/app/build.gradle');
+  final gradleKtsFile = File('android/app/build.gradle.kts');
+
+  final isKts = gradleKtsFile.existsSync();
+  final targetFile = isKts ? gradleKtsFile : gradleFile;
+
+  if (!targetFile.existsSync()) {
+    print('  ⚠️  Android gradle file not found');
+    return;
+  }
+
+  var content = await targetFile.readAsString();
+
+  // Find and remove productFlavors block entirely
+  if (content.contains('productFlavors')) {
+    content = _removeProductFlavorsBlockSafe(content);
+
+    await targetFile.writeAsString(content);
+    print('  ✅ Removed Android productFlavors block');
+  }
+}
+
+String _removeProductFlavorsBlockSafe(String content) {
+  // First, remove flavorDimensions line
+  content = content.replaceAll(
+    RegExp(r'[ \t]*flavorDimensions\s*\+?=?\s*"default"[ \t]*\n?'),
+    '',
+  );
+
+  // Find productFlavors starting position
+  final productFlavorsMatch = RegExp(
+    r'productFlavors\s*\{',
+  ).firstMatch(content);
+  if (productFlavorsMatch == null) {
+    return content;
+  }
+
+  final startPos = productFlavorsMatch.start;
+  var pos = productFlavorsMatch.end; // Position right after the opening {
+  var braceDepth = 1;
+  var inString = false;
+  var inComment = false;
+  var inMultiLineComment = false;
+  String? stringChar;
+
+  // Parse character by character, handling strings and comments
+  while (pos < content.length && braceDepth > 0) {
+    final char = content[pos];
+    final nextChar = pos + 1 < content.length ? content[pos + 1] : '';
+
+    // Handle multi-line comments /* */
+    if (!inString && !inComment) {
+      if (char == '/' && nextChar == '*') {
+        inMultiLineComment = true;
+        pos += 2;
+        continue;
+      }
+      if (inMultiLineComment && char == '*' && nextChar == '/') {
+        inMultiLineComment = false;
+        pos += 2;
+        continue;
+      }
+    }
+
+    // Handle single-line comments //
+    if (!inString && !inMultiLineComment && char == '/' && nextChar == '/') {
+      inComment = true;
+    }
+    if (inComment && char == '\n') {
+      inComment = false;
+    }
+
+    // Skip if in comment
+    if (inComment || inMultiLineComment) {
+      pos++;
+      continue;
+    }
+
+    // Handle strings
+    if (char == '"' || char == "'") {
+      if (!inString) {
+        inString = true;
+        stringChar = char;
+      } else if (char == stringChar) {
+        // Check if it's escaped
+        var escapeCount = 0;
+        var checkPos = pos - 1;
+        while (checkPos >= 0 && content[checkPos] == '\\') {
+          escapeCount++;
+          checkPos--;
+        }
+        // If even number of backslashes (or zero), the quote is not escaped
+        if (escapeCount % 2 == 0) {
+          inString = false;
+          stringChar = null;
+        }
+      }
+    }
+
+    // Count braces only if not in string or comment
+    if (!inString) {
+      if (char == '{') {
+        braceDepth++;
+      } else if (char == '}') {
+        braceDepth--;
+      }
+    }
+
+    pos++;
+  }
+
+  if (braceDepth != 0) {
+    print('  ⚠️  Warning: Unmatched braces detected in productFlavors block');
+    return content; // Return original content if parsing failed
+  }
+
+  // Remove the productFlavors block
+  final beforeBlock = content.substring(0, startPos);
+  final afterBlock = content.substring(pos);
+
+  // Combine and clean up extra blank lines
+  var result = beforeBlock + afterBlock;
+  result = result.replaceAll(RegExp(r'\n\s*\n\s*\n+'), '\n\n');
+
+  return result;
+}
+
+Future<void> _removeIOSSchemes(List<String> flavorsToRemove) async {
+  print('  🍎 Removing iOS schemes...');
+
+  final schemesDir = Directory('ios/Runner.xcodeproj/xcshareddata/xcschemes');
+  if (!schemesDir.existsSync()) {
+    print('  ⚠️  iOS schemes directory not found');
+    return;
+  }
+
+  for (final flavor in flavorsToRemove) {
+    final schemeFile = File('${schemesDir.path}/$flavor.xcscheme');
+    if (schemeFile.existsSync()) {
+      await schemeFile.delete();
+      print('  ✅ Removed $flavor.xcscheme');
+    }
+  }
+}
+
+Future<void> _removeIOSConfigurations(List<String> flavorsToRemove) async {
+  print('  🍎 Removing iOS build configurations...');
+
+  final pbxprojFile = File('ios/Runner.xcodeproj/project.pbxproj');
+  if (!pbxprojFile.existsSync()) {
+    print('  ⚠️  project.pbxproj not found');
+    return;
+  }
+
+  var content = await pbxprojFile.readAsString();
+
+  // Remove flavor configurations (this function already exists in your code)
+  content = _removeFlavorConfigurations(content, flavorsToRemove);
+
+  await pbxprojFile.writeAsString(content);
+  print('  ✅ Removed iOS build configurations');
+}
+
+Future<void> _removeDartEntryFiles(List<String> flavorsToRemove) async {
+  print('  📦 Removing Dart entry files...');
+
+  for (final flavor in flavorsToRemove) {
+    final mainFile = File('lib/main_$flavor.dart');
+    if (mainFile.existsSync()) {
+      await mainFile.delete();
+      print('  ✅ Removed lib/main_$flavor.dart');
+    }
+  }
+}
+
+Future<void> _removeEnvFiles(List<String> flavorsToRemove) async {
+  print('  📁 Removing .env files...');
+
+  for (final flavor in flavorsToRemove) {
+    final envFile = File('.env.$flavor');
+    if (envFile.existsSync()) {
+      await envFile.delete();
+      print('  ✅ Removed .env.$flavor');
+    }
+  }
 }
