@@ -20,30 +20,69 @@ Future<void> main() async {
     print('❌ App name can only contain letters, numbers and spaces. Exiting.');
     exit(0);
   }
-  // Get base bundle ID
-  stdout.write('Enter your (iOS) base bundle ID (e.g. com.example.myapp): ');
-  String? baseBundleIdInput = stdin.readLineSync();
-  baseBundleIdInput = baseBundleIdInput?.trim();
-  if (baseBundleIdInput == null || baseBundleIdInput.trim().isEmpty) {
-    print('❌ No base bundle ID entered. Exiting.');
-    exit(0);
+
+  final appName = appNameInput.trim();
+
+  // Read existing bundle ID and package name
+  final existingBundleId = await _readExistingBundleId();
+  final existingPackageName = await _readExistingPackageName();
+
+  // Handle iOS Bundle ID
+  String baseBundleId;
+  if (existingBundleId != null) {
+    print('\n📱 Found existing iOS Bundle ID: $existingBundleId');
+    stdout.write(
+      'Do you want to:\n'
+      '  1. Keep this Bundle ID\n'
+      '  2. Enter a new Bundle ID\n'
+      'Enter your choice (1/2): ',
+    );
+    final bundleChoice = stdin.readLineSync()?.trim();
+
+    if (bundleChoice == '1') {
+      baseBundleId = existingBundleId;
+      print('✅ Using existing Bundle ID: $baseBundleId');
+    } else if (bundleChoice == '2') {
+      baseBundleId = await _promptForBundleId();
+    } else {
+      print('❌ Invalid choice. Exiting.');
+      exit(0);
+    }
+  } else {
+    print('\n📱 No existing iOS Bundle ID found.');
+    baseBundleId = await _promptForBundleId();
   }
 
-  stdout.write('Enter your (Android) package name (e.g. com.example.myapp): ');
-  String? androidPackageNameInput = stdin.readLineSync();
-  androidPackageNameInput = androidPackageNameInput?.trim();
-  if (androidPackageNameInput == null ||
-      androidPackageNameInput.trim().isEmpty) {
-    print('❌ No android package name entered. Exiting.');
-    exit(0);
+  // Handle Android Package Name
+  String androidPackageName;
+  if (existingPackageName != null) {
+    print('\n🤖 Found existing Android package name: $existingPackageName');
+    stdout.write(
+      'Do you want to:\n'
+      '  1. Keep this package name\n'
+      '  2. Enter a new package name\n'
+      'Enter your choice (1/2): ',
+    );
+    final packageChoice = stdin.readLineSync()?.trim();
+
+    if (packageChoice == '1') {
+      androidPackageName = existingPackageName;
+      print('✅ Using existing package name: $androidPackageName');
+    } else if (packageChoice == '2') {
+      androidPackageName = await _promptForPackageName();
+    } else {
+      print('❌ Invalid choice. Exiting.');
+      exit(0);
+    }
+  } else {
+    print('\n🤖 No existing Android package name found.');
+    androidPackageName = await _promptForPackageName();
   }
-  final androidPackageName = androidPackageNameInput.trim();
-  final baseBundleId = baseBundleIdInput.trim();
-  final appName = appNameInput.trim();
+
   final appFileName = _toSnakeCase(appName);
 
   // Get flavors
-  stdout.write('Enter flavors separated by commas (e.g. dev,qa,prod): ');
+  stdout.write('\nEnter flavors separated by commas (e.g. dev,qa,prod): ');
   final input = stdin.readLineSync();
   if (input == null || input.trim().isEmpty) {
     print('❌ No flavors entered. Exiting.');
@@ -56,6 +95,8 @@ Future<void> main() async {
 
   print('\n🚀 Starting flavor setup for: ${flavors.join(', ')}');
   print('📱 App Name: $appName');
+  print('🍎 iOS Bundle ID: $baseBundleId');
+  print('🤖 Android Package: $androidPackageName');
   print('📄 App File: lib/$appFileName.dart\n');
 
   await _createEnvFiles(flavors);
@@ -80,6 +121,116 @@ Future<void> main() async {
   for (final f in flavors) {
     print('flutter run --flavor $f -t lib/main_$f.dart');
   }
+}
+
+Future<String> _promptForBundleId() async {
+  stdout.write('Enter your iOS base bundle ID (e.g. com.example.myapp): ');
+  String? baseBundleIdInput = stdin.readLineSync();
+  baseBundleIdInput = baseBundleIdInput?.trim();
+  if (baseBundleIdInput == null || baseBundleIdInput.trim().isEmpty) {
+    print('❌ No base bundle ID entered. Exiting.');
+    exit(0);
+  }
+  return baseBundleIdInput.trim();
+}
+
+Future<String> _promptForPackageName() async {
+  stdout.write('Enter your Android package name (e.g. com.example.myapp): ');
+  String? androidPackageNameInput = stdin.readLineSync();
+  androidPackageNameInput = androidPackageNameInput?.trim();
+  if (androidPackageNameInput == null ||
+      androidPackageNameInput.trim().isEmpty) {
+    print('❌ No android package name entered. Exiting.');
+    exit(0);
+  }
+  return androidPackageNameInput.trim();
+}
+
+/// Reads existing iOS Bundle ID from project.pbxproj
+Future<String?> _readExistingBundleId() async {
+  final pbxprojFile = File('ios/Runner.xcodeproj/project.pbxproj');
+  if (!pbxprojFile.existsSync()) {
+    return null;
+  }
+
+  final content = await pbxprojFile.readAsString();
+
+  // Look for PRODUCT_BUNDLE_IDENTIFIER
+  final bundleIdMatch = RegExp(
+    r'PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);',
+  ).firstMatch(content);
+
+  if (bundleIdMatch != null) {
+    var bundleId = bundleIdMatch.group(1)!.trim();
+    // Remove quotes if present
+    bundleId = bundleId.replaceAll('"', '');
+
+    // If it contains a variable like $(PRODUCT_BUNDLE_IDENTIFIER), skip it
+    if (bundleId.contains('\$')) {
+      return null;
+    }
+
+    // If it has a suffix like .dev or .qa, remove it to get base
+    final suffixMatch = RegExp(
+      r'^(.+)\.(dev|qa|prod|staging)$',
+    ).firstMatch(bundleId);
+    if (suffixMatch != null) {
+      return suffixMatch.group(1);
+    }
+
+    return bundleId;
+  }
+
+  return null;
+}
+
+/// Reads existing Android package name from build.gradle or build.gradle.kts
+Future<String?> _readExistingPackageName() async {
+  final gradleFile = File('android/app/build.gradle');
+  final gradleKtsFile = File('android/app/build.gradle.kts');
+
+  final isKts = gradleKtsFile.existsSync();
+  final targetFile = isKts ? gradleKtsFile : gradleFile;
+
+  if (!targetFile.existsSync()) {
+    return null;
+  }
+
+  final content = await targetFile.readAsString();
+
+  // Look for applicationId
+  final applicationIdPattern =
+      isKts
+          ? RegExp(r'applicationId\s*=\s*"([^"]+)"')
+          : RegExp(r'applicationId\s+"([^"]+)"');
+
+  final match = applicationIdPattern.firstMatch(content);
+  if (match != null) {
+    var packageName = match.group(1)!.trim();
+
+    // If it has a suffix like .dev or .qa, try to find base
+    final suffixMatch = RegExp(
+      r'^(.+)\.(dev|qa|prod|staging)$',
+    ).firstMatch(packageName);
+    if (suffixMatch != null) {
+      return suffixMatch.group(1);
+    }
+
+    return packageName;
+  }
+
+  // Fallback: try to read from namespace
+  final namespacePattern =
+      isKts
+          ? RegExp(r'namespace\s*=\s*"([^"]+)"')
+          : RegExp(r'namespace\s+"([^"]+)"');
+
+  final namespaceMatch = namespacePattern.firstMatch(content);
+  if (namespaceMatch != null) {
+    return namespaceMatch.group(1)!.trim();
+  }
+
+  return null;
 }
 
 String _toSnakeCase(String input) {
@@ -163,23 +314,23 @@ Future<void> _setupAndroid(
     }
   }
 
-  // Search and replace namespace
-  if (content.contains('namespace')) {
-    final namespacePattern =
-        isKts
-            ? RegExp(r'namespace\s*=\s*"[^"]*"')
-            : RegExp(r'namespace\s+"[^"]*"');
+  // // Search and replace namespace
+  // if (content.contains('namespace')) {
+  //   final namespacePattern =
+  //       isKts
+  //           ? RegExp(r'namespace\s*=\s*"[^"]*"')
+  //           : RegExp(r'namespace\s+"[^"]*"');
 
-    if (namespacePattern.hasMatch(content)) {
-      content = content.replaceAll(
-        namespacePattern,
-        isKts
-            ? 'namespace = "$androidPackageName"'
-            : 'namespace "$androidPackageName"',
-      );
-      print('✅ Replaced namespace with: $androidPackageName');
-    }
-  }
+  //   if (namespacePattern.hasMatch(content)) {
+  //     content = content.replaceAll(
+  //       namespacePattern,
+  //       isKts
+  //           ? 'namespace = "$androidPackageName"'
+  //           : 'namespace "$androidPackageName"',
+  //     );
+  //     print('✅ Replaced namespace with: $androidPackageName');
+  //   }
+  // }
 
   // Write the updated content
   await targetFile.writeAsString(content);
@@ -1138,7 +1289,7 @@ Future<void> _createVSCodeLaunchConfig(
   List<String> flavors,
   String appName,
 ) async {
-  print('\n🔧 Creating VS Code/Cursor launch configurations...');
+  print('\n🔧 Updating VS Code/Cursor launch configurations...');
 
   final vscodeDir = Directory('.vscode');
   vscodeDir.createSync(recursive: true);
@@ -1146,12 +1297,59 @@ Future<void> _createVSCodeLaunchConfig(
   final launchFile = File('.vscode/launch.json');
   final displayAppName = _toTitleCase(appName);
 
-  // Create configurations for each flavor in both debug and release modes
-  final configurations = <Map<String, dynamic>>[];
+  // Read existing configurations if file exists
+  var existingConfigurations = <Map<String, dynamic>>[];
+  if (launchFile.existsSync()) {
+    try {
+      final existingContent = await launchFile.readAsString();
+      final existingJson = jsonDecode(existingContent) as Map<String, dynamic>;
+      if (existingJson['configurations'] != null) {
+        existingConfigurations = List<Map<String, dynamic>>.from(
+          existingJson['configurations'],
+        );
+      }
+    } catch (e) {
+      print('⚠️  Could not parse existing launch.json, will recreate it');
+    }
+  }
 
-  for (final flavor in flavors) {
+  // Get all existing flavors from main_*.dart files
+  final allExistingFlavors = <String>{};
+  final libDir = Directory('lib');
+  if (libDir.existsSync()) {
+    await for (final entity in libDir.list()) {
+      if (entity is File && entity.path.contains('main_')) {
+        final filename = entity.path.split('/').last;
+        final flavorMatch = RegExp(r'main_(\w+)\.dart').firstMatch(filename);
+        if (flavorMatch != null) {
+          allExistingFlavors.add(flavorMatch.group(1)!);
+        }
+      }
+    }
+  }
+
+  // Combine new flavors with existing ones
+  final allFlavors = {...allExistingFlavors, ...flavors}.toList()..sort();
+
+  // Remove old configurations for all flavors (to avoid duplicates)
+  existingConfigurations.removeWhere((config) {
+    final name = config['name'] as String?;
+    if (name == null) return false;
+
+    // Check if this config matches any flavor pattern
+    for (final flavor in allFlavors) {
+      if (name.contains(flavor.toUpperCase())) {
+        return true;
+      }
+    }
+    return false;
+  });
+
+  // Create new configurations for all flavors
+  final newConfigurations = <Map<String, dynamic>>[];
+  for (final flavor in allFlavors) {
     // Debug configuration
-    configurations.add({
+    newConfigurations.add({
       'name': '$displayAppName - ${flavor.toUpperCase()} (Debug)',
       'request': 'launch',
       'type': 'dart',
@@ -1161,7 +1359,7 @@ Future<void> _createVSCodeLaunchConfig(
     });
 
     // Release configuration
-    configurations.add({
+    newConfigurations.add({
       'name': '$displayAppName - ${flavor.toUpperCase()} (Release)',
       'request': 'launch',
       'type': 'dart',
@@ -1171,17 +1369,23 @@ Future<void> _createVSCodeLaunchConfig(
     });
   }
 
-  final launchConfig = {'version': '0.2.0', 'configurations': configurations};
+  // Combine: existing non-flavor configs + new flavor configs
+  final allConfigurations = [...existingConfigurations, ...newConfigurations];
+
+  final launchConfig = {
+    'version': '0.2.0',
+    'configurations': allConfigurations,
+  };
 
   await launchFile.writeAsString(
     const JsonEncoder.withIndent('    ').convert(launchConfig),
   );
 
   print(
-    '✅ Created .vscode/launch.json with ${configurations.length} configurations',
+    '✅ Updated .vscode/launch.json with ${newConfigurations.length} flavor configurations',
   );
   print('   📱 Available launch configurations:');
-  for (final config in configurations) {
+  for (final config in newConfigurations) {
     print('   • ${config['name']}');
   }
 }
