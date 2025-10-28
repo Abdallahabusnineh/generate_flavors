@@ -90,7 +90,11 @@ Future<void> main() async {
   }
 
   final flavors =
-      input.split(',').map((f) => f.trim()).where((f) => f.isNotEmpty).toList();
+      input
+          .split(',')
+          .map((f) => f.trim().toLowerCase())
+          .where((f) => f.isNotEmpty)
+          .toList();
   await _checkIfFlavorAlreadyExists(flavors);
 
   print('\n🚀 Starting flavor setup for: ${flavors.join(', ')}');
@@ -1318,7 +1322,7 @@ Future<void> _createVSCodeLaunchConfig(
   final libDir = Directory('lib');
   if (libDir.existsSync()) {
     await for (final entity in libDir.list()) {
-      if (entity is File && entity.path.contains('main_')) {
+      if (entity is File && entity.path.contains('main_') && entity.path.contains('.dart')) {
         final filename = entity.path.split('/').last;
         final flavorMatch = RegExp(r'main_(\w+)\.dart').firstMatch(filename);
         if (flavorMatch != null) {
@@ -1522,28 +1526,30 @@ Future<void> _checkIfFlavorAlreadyExists(List<String> flavors) async {
       }
 
       // Show which existing flavors are also in the input
-      final commonFlavors =
-          flavors.where((f) => existingFlavors.contains(f)).toList();
-      if (commonFlavors.isNotEmpty) {
-        print('\n🔄 Flavor(s) that are both existing and in your input:');
-        for (final flavor in commonFlavors) {
-          print('   • $flavor');
-        }
-      }
+      //  TODO Add this when we have a way to recreate common flavors
+      // final commonFlavors =
+      //     flavors.where((f) => existingFlavors.contains(f)).toList();
+      // if (commonFlavors.isNotEmpty) {
+      //   print('\n🔄 Flavor(s) that are both existing and in your input:');
+      //   for (final flavor in commonFlavors) {
+      //     print('   • $flavor');
+      //   }
+      // }
 
       print('\nOptions:');
       print(
         '1. Skip existing flavors (only add new ones: ${newFlavors.join(', ')})',
       );
-      print(
-        '2. Recreate common flavors (recreate: ${commonFlavors.join(', ')}, add new: ${newFlavors.join(', ')})',
-      );
-      print('3. Cancel setup');
-      stdout.write('\nEnter your choice (1/2/3): ');
+      // TODO Add this when we have a way to recreate common flavors
+      // print(
+      //   '2. Recreate common flavors (recreate: ${commonFlavors.join(', ')}, add new: ${newFlavors.join(', ')})',
+      // );
+      print('2. Cancel setup');
+      stdout.write('\nEnter your choice (1/2): ');
 
       final response = stdin.readLineSync()?.trim();
 
-      if (response == '3') {
+      if (response == '2') {
         print('❌ Setup cancelled by user.');
         exit(0);
       } else if (response == '1') {
@@ -1554,239 +1560,240 @@ Future<void> _checkIfFlavorAlreadyExists(List<String> flavors) async {
           exit(0);
         }
         print('✅ Will only setup new flavors: ${flavors.join(', ')}');
-      } else if (response == '2') {
-        if (commonFlavors.isEmpty) {
-          print(
-            '⚠️  No common flavors to recreate. Will only add new flavors.',
-          );
-        } else {
-          print('✅ Will recreate: ${commonFlavors.join(', ')}');
-          print('✅ Will add new: ${newFlavors.join(', ')}');
-          print(
-            '🗑️  Removing configurations for: ${commonFlavors.join(', ')}...\n',
-          );
-
-          // Only remove the common flavors
-          await _removeExistingFlavors(commonFlavors);
-
-          print('✅ Removed configurations. Proceeding with setup...\n');
-        }
-        // flavors list stays as-is (contains both common and new)
-      } else {
+      }
+      // TODO Add this when we have a way to recreate common flavors
+      // else if (response == '2') {
+      //   if (commonFlavors.isEmpty) {
+      //     print(
+      //       '⚠️  No common flavors to recreate. Will only add new flavors.',
+      //     );
+      //   } else {
+      //     print('✅ Will recreate: ${commonFlavors.join(', ')}');
+      //     print('✅ Will add new: ${newFlavors.join(', ')}');
+      //     print(
+      //       '🗑️  Removing configurations for: ${commonFlavors.join(', ')}...\n',
+      //     );
+      //     // Only remove the common flavors
+      //     await _removeExistingFlavors(commonFlavors);
+      //     print('✅ Removed configurations. Proceeding with setup...\n');
+      //   }
+      //   // flavors list stays as-is (contains both common and new)
+      // }
+      else {
         print('❌ Invalid choice. Exiting.');
         exit(0);
       }
     }
   }
 }
+// TODO Add this when we have a way to recreate common flavors
+// Future<void> _removeExistingFlavors(List<String> flavorsToRemove) async {
+//   print('🗑️  Removing existing flavor configurations...');
 
-Future<void> _removeExistingFlavors(List<String> flavorsToRemove) async {
-  print('🗑️  Removing existing flavor configurations...');
+//   // 1. Remove Android flavor configurations
+//   await _removeAndroidFlavors(flavorsToRemove);
 
-  // 1. Remove Android flavor configurations
-  await _removeAndroidFlavors(flavorsToRemove);
+//   // 2. Remove iOS schemes
+//   await _removeIOSSchemes(flavorsToRemove);
 
-  // 2. Remove iOS schemes
-  await _removeIOSSchemes(flavorsToRemove);
+//   // 3. Remove iOS configurations from project.pbxproj
+//   await _removeIOSConfigurations(flavorsToRemove);
 
-  // 3. Remove iOS configurations from project.pbxproj
-  await _removeIOSConfigurations(flavorsToRemove);
+//   // 4. Remove main_*.dart files
+//   await _removeDartEntryFiles(flavorsToRemove);
 
-  // 4. Remove main_*.dart files
-  await _removeDartEntryFiles(flavorsToRemove);
+//   // 5. Remove .env files
+//   await _removeEnvFiles(flavorsToRemove);
 
-  // 5. Remove .env files
-  await _removeEnvFiles(flavorsToRemove);
+//   print('✅ All existing flavor configurations removed\n');
+// }
 
-  print('✅ All existing flavor configurations removed\n');
-}
+// Future<void> _removeAndroidFlavors(List<String> flavorsToRemove) async {
+//   print('  🤖 Removing Android flavors...');
 
-Future<void> _removeAndroidFlavors(List<String> flavorsToRemove) async {
-  print('  🤖 Removing Android flavors...');
+//   final gradleFile = File('android/app/build.gradle');
+//   final gradleKtsFile = File('android/app/build.gradle.kts');
 
-  final gradleFile = File('android/app/build.gradle');
-  final gradleKtsFile = File('android/app/build.gradle.kts');
+//   final isKts = gradleKtsFile.existsSync();
+//   final targetFile = isKts ? gradleKtsFile : gradleFile;
 
-  final isKts = gradleKtsFile.existsSync();
-  final targetFile = isKts ? gradleKtsFile : gradleFile;
+//   if (!targetFile.existsSync()) {
+//     print('  ⚠️  Android gradle file not found');
+//     return;
+//   }
 
-  if (!targetFile.existsSync()) {
-    print('  ⚠️  Android gradle file not found');
-    return;
-  }
+//   var content = await targetFile.readAsString();
 
-  var content = await targetFile.readAsString();
+//   // Find and remove productFlavors block entirely
+//   if (content.contains('productFlavors')) {
+//     content = _removeProductFlavorsBlockSafe(content);
 
-  // Find and remove productFlavors block entirely
-  if (content.contains('productFlavors')) {
-    content = _removeProductFlavorsBlockSafe(content);
+//     await targetFile.writeAsString(content);
+//     print('  ✅ Removed Android productFlavors block');
+//   }
+// }
 
-    await targetFile.writeAsString(content);
-    print('  ✅ Removed Android productFlavors block');
-  }
-}
+// String _removeProductFlavorsBlockSafe(String content) {
+//   // First, remove flavorDimensions line
+//   content = content.replaceAll(
+//     RegExp(r'[ \t]*flavorDimensions\s*\+?=?\s*"default"[ \t]*\n?'),
+//     '',
+//   );
 
-String _removeProductFlavorsBlockSafe(String content) {
-  // First, remove flavorDimensions line
-  content = content.replaceAll(
-    RegExp(r'[ \t]*flavorDimensions\s*\+?=?\s*"default"[ \t]*\n?'),
-    '',
-  );
+//   // Find productFlavors starting position
+//   final productFlavorsMatch = RegExp(
+//     r'productFlavors\s*\{',
+//   ).firstMatch(content);
+//   if (productFlavorsMatch == null) {
+//     return content;
+//   }
 
-  // Find productFlavors starting position
-  final productFlavorsMatch = RegExp(
-    r'productFlavors\s*\{',
-  ).firstMatch(content);
-  if (productFlavorsMatch == null) {
-    return content;
-  }
+//   final startPos = productFlavorsMatch.start;
+//   var pos = productFlavorsMatch.end; // Position right after the opening {
+//   var braceDepth = 1;
+//   var inString = false;
+//   var inComment = false;
+//   var inMultiLineComment = false;
+//   String? stringChar;
 
-  final startPos = productFlavorsMatch.start;
-  var pos = productFlavorsMatch.end; // Position right after the opening {
-  var braceDepth = 1;
-  var inString = false;
-  var inComment = false;
-  var inMultiLineComment = false;
-  String? stringChar;
+//   // Parse character by character, handling strings and comments
+//   while (pos < content.length && braceDepth > 0) {
+//     final char = content[pos];
+//     final nextChar = pos + 1 < content.length ? content[pos + 1] : '';
 
-  // Parse character by character, handling strings and comments
-  while (pos < content.length && braceDepth > 0) {
-    final char = content[pos];
-    final nextChar = pos + 1 < content.length ? content[pos + 1] : '';
+//     // Handle multi-line comments /* */
+//     if (!inString && !inComment) {
+//       if (char == '/' && nextChar == '*') {
+//         inMultiLineComment = true;
+//         pos += 2;
+//         continue;
+//       }
+//       if (inMultiLineComment && char == '*' && nextChar == '/') {
+//         inMultiLineComment = false;
+//         pos += 2;
+//         continue;
+//       }
+//     }
 
-    // Handle multi-line comments /* */
-    if (!inString && !inComment) {
-      if (char == '/' && nextChar == '*') {
-        inMultiLineComment = true;
-        pos += 2;
-        continue;
-      }
-      if (inMultiLineComment && char == '*' && nextChar == '/') {
-        inMultiLineComment = false;
-        pos += 2;
-        continue;
-      }
-    }
+//     // Handle single-line comments //
+//     if (!inString && !inMultiLineComment && char == '/' && nextChar == '/') {
+//       inComment = true;
+//     }
+//     if (inComment && char == '\n') {
+//       inComment = false;
+//     }
 
-    // Handle single-line comments //
-    if (!inString && !inMultiLineComment && char == '/' && nextChar == '/') {
-      inComment = true;
-    }
-    if (inComment && char == '\n') {
-      inComment = false;
-    }
+//     // Skip if in comment
+//     if (inComment || inMultiLineComment) {
+//       pos++;
+//       continue;
+//     }
 
-    // Skip if in comment
-    if (inComment || inMultiLineComment) {
-      pos++;
-      continue;
-    }
+//     // Handle strings
+//     if (char == '"' || char == "'") {
+//       if (!inString) {
+//         inString = true;
+//         stringChar = char;
+//       } else if (char == stringChar) {
+//         // Check if it's escaped
+//         var escapeCount = 0;
+//         var checkPos = pos - 1;
+//         while (checkPos >= 0 && content[checkPos] == '\\') {
+//           escapeCount++;
+//           checkPos--;
+//         }
+//         // If even number of backslashes (or zero), the quote is not escaped
+//         if (escapeCount % 2 == 0) {
+//           inString = false;
+//           stringChar = null;
+//         }
+//       }
+//     }
 
-    // Handle strings
-    if (char == '"' || char == "'") {
-      if (!inString) {
-        inString = true;
-        stringChar = char;
-      } else if (char == stringChar) {
-        // Check if it's escaped
-        var escapeCount = 0;
-        var checkPos = pos - 1;
-        while (checkPos >= 0 && content[checkPos] == '\\') {
-          escapeCount++;
-          checkPos--;
-        }
-        // If even number of backslashes (or zero), the quote is not escaped
-        if (escapeCount % 2 == 0) {
-          inString = false;
-          stringChar = null;
-        }
-      }
-    }
+//     // Count braces only if not in string or comment
+//     if (!inString) {
+//       if (char == '{') {
+//         braceDepth++;
+//       } else if (char == '}') {
+//         braceDepth--;
+//       }
+//     }
 
-    // Count braces only if not in string or comment
-    if (!inString) {
-      if (char == '{') {
-        braceDepth++;
-      } else if (char == '}') {
-        braceDepth--;
-      }
-    }
+//     pos++;
+//   }
 
-    pos++;
-  }
+//   if (braceDepth != 0) {
+//     print('  ⚠️  Warning: Unmatched braces detected in productFlavors block');
+//     return content; // Return original content if parsing failed
+//   }
 
-  if (braceDepth != 0) {
-    print('  ⚠️  Warning: Unmatched braces detected in productFlavors block');
-    return content; // Return original content if parsing failed
-  }
+//   // Remove the productFlavors block
+//   final beforeBlock = content.substring(0, startPos);
+//   final afterBlock = content.substring(pos);
 
-  // Remove the productFlavors block
-  final beforeBlock = content.substring(0, startPos);
-  final afterBlock = content.substring(pos);
+//   // Combine and clean up extra blank lines
+//   var result = beforeBlock + afterBlock;
+//   result = result.replaceAll(RegExp(r'\n\s*\n\s*\n+'), '\n\n');
 
-  // Combine and clean up extra blank lines
-  var result = beforeBlock + afterBlock;
-  result = result.replaceAll(RegExp(r'\n\s*\n\s*\n+'), '\n\n');
+//   return result;
+// }
 
-  return result;
-}
+// Future<void> _removeIOSSchemes(List<String> flavorsToRemove) async {
+//   print('  🍎 Removing iOS schemes...');
 
-Future<void> _removeIOSSchemes(List<String> flavorsToRemove) async {
-  print('  🍎 Removing iOS schemes...');
+//   final schemesDir = Directory('ios/Runner.xcodeproj/xcshareddata/xcschemes');
+//   if (!schemesDir.existsSync()) {
+//     print('  ⚠️  iOS schemes directory not found');
+//     return;
+//   }
 
-  final schemesDir = Directory('ios/Runner.xcodeproj/xcshareddata/xcschemes');
-  if (!schemesDir.existsSync()) {
-    print('  ⚠️  iOS schemes directory not found');
-    return;
-  }
+//   for (final flavor in flavorsToRemove) {
+//     final schemeFile = File('${schemesDir.path}/$flavor.xcscheme');
+//     if (schemeFile.existsSync()) {
+//       await schemeFile.delete();
+//       print('  ✅ Removed $flavor.xcscheme');
+//     }
+//   }
+// }
 
-  for (final flavor in flavorsToRemove) {
-    final schemeFile = File('${schemesDir.path}/$flavor.xcscheme');
-    if (schemeFile.existsSync()) {
-      await schemeFile.delete();
-      print('  ✅ Removed $flavor.xcscheme');
-    }
-  }
-}
+// Future<void> _removeIOSConfigurations(List<String> flavorsToRemove) async {
+//   print('  🍎 Removing iOS build configurations...');
 
-Future<void> _removeIOSConfigurations(List<String> flavorsToRemove) async {
-  print('  🍎 Removing iOS build configurations...');
+//   final pbxprojFile = File('ios/Runner.xcodeproj/project.pbxproj');
+//   if (!pbxprojFile.existsSync()) {
+//     print('  ⚠️  project.pbxproj not found');
+//     return;
+//   }
 
-  final pbxprojFile = File('ios/Runner.xcodeproj/project.pbxproj');
-  if (!pbxprojFile.existsSync()) {
-    print('  ⚠️  project.pbxproj not found');
-    return;
-  }
+//   var content = await pbxprojFile.readAsString();
 
-  var content = await pbxprojFile.readAsString();
+//   // Remove flavor configurations (this function already exists in your code)
+//   content = _removeFlavorConfigurations(content, flavorsToRemove);
 
-  // Remove flavor configurations (this function already exists in your code)
-  content = _removeFlavorConfigurations(content, flavorsToRemove);
+//   await pbxprojFile.writeAsString(content);
+//   print('  ✅ Removed iOS build configurations');
+// }
 
-  await pbxprojFile.writeAsString(content);
-  print('  ✅ Removed iOS build configurations');
-}
+// Future<void> _removeDartEntryFiles(List<String> flavorsToRemove) async {
+//   print('  📦 Removing Dart entry files...');
 
-Future<void> _removeDartEntryFiles(List<String> flavorsToRemove) async {
-  print('  📦 Removing Dart entry files...');
+//   for (final flavor in flavorsToRemove) {
+//     final mainFile = File('lib/main_$flavor.dart');
+//     if (mainFile.existsSync()) {
+//       await mainFile.delete();
+//       print('  ✅ Removed lib/main_$flavor.dart');
+//     }
+//   }
+// }
 
-  for (final flavor in flavorsToRemove) {
-    final mainFile = File('lib/main_$flavor.dart');
-    if (mainFile.existsSync()) {
-      await mainFile.delete();
-      print('  ✅ Removed lib/main_$flavor.dart');
-    }
-  }
-}
+// Future<void> _removeEnvFiles(List<String> flavorsToRemove) async {
+//   print('  📁 Removing .env files...');
 
-Future<void> _removeEnvFiles(List<String> flavorsToRemove) async {
-  print('  📁 Removing .env files...');
-
-  for (final flavor in flavorsToRemove) {
-    final envFile = File('.env.$flavor');
-    if (envFile.existsSync()) {
-      await envFile.delete();
-      print('  ✅ Removed .env.$flavor');
-    }
-  }
-}
+//   for (final flavor in flavorsToRemove) {
+//     final envFile = File('.env.$flavor');
+//     if (envFile.existsSync()) {
+//       await envFile.delete();
+//       print('  ✅ Removed .env.$flavor');
+//     }
+//   }
+// }
