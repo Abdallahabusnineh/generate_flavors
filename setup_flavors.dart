@@ -145,6 +145,10 @@ Future<void> main() async {
   }
 
   await _checkIfFlavorAlreadyExists(flavors);
+  if (!hasExistingFlavors) {
+    print('✅ No existing flavors found. Proceeding with setup...');
+    await _removeVSCodeLaunchConfig();
+  }
 
   print('\n🚀 Starting flavor setup for: ${flavors.join(', ')}');
   print('📱 App Name: $appName');
@@ -156,7 +160,6 @@ Future<void> main() async {
   await _setupAndroid(flavors, appName, androidPackageName);
   await _setupIOSPodfile();
   await _setupIOS(flavors, appName, baseBundleId);
-  await _deleteMainDart();
   await _splitAndCreateAppFile(appName.replaceAll(' ', ''), appFileName);
   await _createDartEntryFiles(
     flavors,
@@ -164,6 +167,7 @@ Future<void> main() async {
     appFileName,
   );
   await _updateWidgetTest(appName.replaceAll(' ', ''), appFileName);
+  await _deleteMainDart();
   await _podInstallIos();
   await _flutterClean();
   await _flutterPubGet();
@@ -1232,7 +1236,7 @@ void _updateSchemeConfigurations(File schemeFile, String flavor) {
 }
 
 Future<void> _splitAndCreateAppFile(String appName, String appFileName) async {
-  print('\n📦 Extracting app widget from main.dart...');
+  print('\n📦 Extracting app code from main.dart...');
 
   final mainFile = File('lib/main.dart');
   if (!mainFile.existsSync()) {
@@ -1243,74 +1247,109 @@ Future<void> _splitAndCreateAppFile(String appName, String appFileName) async {
 
   var content = await mainFile.readAsString();
 
-  // Find the MyApp class (handles extends, with, implements)
-  final classPattern = RegExp(
-    r'class\s+MyApp\s+extends\s+\w+(?:\s+with\s+[\w\s,]+)?(?:\s+implements\s+[\w\s,]+)?\s*\{',
-    multiLine: true,
-  );
+  // Detect the actual app class name from runApp()
+  final originalClassName = _detectAppClassName(content);
 
-  final classMatch = classPattern.firstMatch(content);
-
-  if (classMatch == null) {
-    print('⚠️ MyApp class not found in main.dart. Creating new app file.');
-    await _createNewAppFile(appName, appFileName);
+  if (originalClassName == null) {
+    print('⚠️ Could not detect app class name from runApp(). Using default.');
+    // Remove the main() function and keep everything else
+    final appContent = _removeMainFunction(content);
+    final appFile = File('lib/$appFileName.dart');
+    appFile.writeAsStringSync(appContent);
+    print('✅ Created lib/$appFileName.dart preserving original code');
     return;
   }
 
-  // Extract the full MyApp class by finding matching braces
-  final classStart = classMatch.start;
-  final classCode = _extractClass(content, classStart);
+  print('📝 Found app class: $originalClassName');
 
-  if (classCode == null) {
-    print('⚠️ Could not extract MyApp class properly. Creating new app file.');
-    await _createNewAppFile(appName, appFileName);
-    return;
-  }
+  // Remove the main() function and keep everything else
+  final appContent = _removeMainFunction(content);
 
-  // Rename MyApp to user's app name
-  final renamedClassCode = classCode.replaceAllMapped(
-    RegExp(r'\bMyApp\b'),
+  // Rename the detected class to user's app name
+  final renamedContent = appContent.replaceAllMapped(
+    RegExp('\\b$originalClassName\\b'),
     (match) => appName,
   );
 
-  // Create the new app file
+  // Create the new app file with all the code (except main())
   final appFile = File('lib/$appFileName.dart');
-  appFile.writeAsStringSync('''
-import 'package:flutter/material.dart';
-
-$renamedClassCode
-''');
-  print('✅ Created lib/$appFileName.dart with $appName class');
+  appFile.writeAsStringSync(renamedContent);
+  print(
+    '✅ Created lib/$appFileName.dart with $appName class (renamed from $originalClassName)',
+  );
 }
 
-String? _extractClass(String content, int startPos) {
-  int braceCount = 0;
-  int i = startPos;
-  int classStart = startPos;
+/// Detects the app class name from runApp() call in main.dart
+String? _detectAppClassName(String content) {
+  // Look for runApp(const ClassName()) or runApp(ClassName())
+  // Pattern matches: runApp(const? ClassName(...))
+  final runAppPattern = RegExp(
+    r'runApp\s*\(\s*(?:const\s+)?([A-Z][a-zA-Z0-9_]*)\s*\(',
+    multiLine: true,
+  );
 
-  // Find the opening brace
-  while (i < content.length && content[i] != '{') {
-    i++;
+  final match = runAppPattern.firstMatch(content);
+  if (match != null) {
+    return match.group(1);
   }
 
-  if (i >= content.length) return null;
+  // Also try to match: runApp(const ClassName.someConstructor())
+  final runAppNamedPattern = RegExp(
+    r'runApp\s*\(\s*(?:const\s+)?([A-Z][a-zA-Z0-9_]*)\.[\w]+\(',
+    multiLine: true,
+  );
 
-  // Now count braces to find the end
-  braceCount = 1;
-  i++;
+  final namedMatch = runAppNamedPattern.firstMatch(content);
+  if (namedMatch != null) {
+    return namedMatch.group(1);
+  }
 
-  while (i < content.length && braceCount > 0) {
-    if (content[i] == '{') {
+  return null;
+}
+
+/// Removes the main() function from the content
+String _removeMainFunction(String content) {
+  // Find "void main" or "Future<void> main"
+  final mainPattern = RegExp(
+    r'(Future<void>|void)\s+main\s*\(',
+    multiLine: true,
+  );
+
+  final mainMatch = mainPattern.firstMatch(content);
+  if (mainMatch == null) {
+    // No main function found, return content as-is
+    return content.trim();
+  }
+
+  // Find the opening brace of main()
+  var pos = content.indexOf('{', mainMatch.start);
+  if (pos == -1) {
+    return content.trim();
+  }
+
+  final mainStart = mainMatch.start;
+  var braceCount = 1;
+  pos++;
+
+  // Count braces to find the end of main()
+  while (pos < content.length && braceCount > 0) {
+    if (content[pos] == '{') {
       braceCount++;
-    } else if (content[i] == '}') {
+    } else if (content[pos] == '}') {
       braceCount--;
     }
-    i++;
+    pos++;
   }
 
-  if (braceCount != 0) return null;
+  if (braceCount != 0) {
+    // Malformed main function, return original
+    return content.trim();
+  }
 
-  return content.substring(classStart, i);
+  // Remove the main function
+  final beforeMain = content.substring(0, mainStart);
+  final afterMain = content.substring(pos);
+  return (beforeMain + afterMain).trim();
 }
 
 Future<void> _createNewAppFile(String appName, String appFileName) async {
@@ -1409,9 +1448,7 @@ import '$appFileName.dart';
 
 /// Entry point for '$flavor' flavor
 void main() {
-  // TODO: Load flavor-specific configuration here
-  // Example: await dotenv.load(fileName: ".env.$flavor");
-  
+print('main $appName $flavor');
   runApp(const $appName());
 }
 ''');
@@ -1431,17 +1468,61 @@ Future<void> _updateWidgetTest(String appName, String appFileName) async {
   var content = await testFile.readAsString();
   final packageName = _getPackageName();
 
+  // Detect the original class name from the test file
+  // Look for patterns like:
+  // - await tester.pumpWidget(const MyApp())
+  // - find.byType(MyApp)
+  String? originalClassName;
+
+  // Pattern 1: pumpWidget(const? ClassName())
+  final pumpWidgetPattern = RegExp(
+    r'pumpWidget\s*\(\s*(?:const\s+)?([A-Z][a-zA-Z0-9_]*)\s*\(',
+    multiLine: true,
+  );
+  final pumpMatch = pumpWidgetPattern.firstMatch(content);
+  if (pumpMatch != null) {
+    originalClassName = pumpMatch.group(1);
+  }
+
+  // Pattern 2: find.byType(ClassName) if pumpWidget didn't work
+  if (originalClassName == null) {
+    final byTypePattern = RegExp(
+      r'\.byType\s*\(\s*([A-Z][a-zA-Z0-9_]*)\s*\)',
+      multiLine: true,
+    );
+    final byTypeMatch = byTypePattern.firstMatch(content);
+    if (byTypeMatch != null) {
+      originalClassName = byTypeMatch.group(1);
+    }
+  }
+
+  // If we couldn't detect from test, try detecting from main.dart
+  if (originalClassName == null) {
+    final mainFile = File('lib/main.dart');
+    if (mainFile.existsSync()) {
+      final mainContent = await mainFile.readAsString();
+      originalClassName = _detectAppClassName(mainContent) ?? 'MyApp';
+    } else {
+      originalClassName = 'MyApp';
+    }
+  }
+
+  print('📝 Detected original class: $originalClassName');
+
   // Replace import from main.dart to the new app file
   content = content.replaceAllMapped(
     RegExp("import\\s+['\"]package:.+?/main\\.dart['\"];?"),
     (match) => "import 'package:$packageName/$appFileName.dart';",
   );
 
-  // Replace MyApp references with the new app name
-  content = content.replaceAllMapped(RegExp(r'\bMyApp\b'), (match) => appName);
+  // Replace the detected class name with the new app name
+  content = content.replaceAllMapped(
+    RegExp('\\b$originalClassName\\b'),
+    (match) => appName,
+  );
 
   await testFile.writeAsString(content);
-  print('✅ Updated test/widget_test.dart with correct imports and class names');
+  print('✅ Updated test/widget_test.dart: $originalClassName → $appName');
 }
 
 String _getPackageName() {
@@ -1639,18 +1720,7 @@ Future<void> _updateInfoPlist() async {
   print('✅ Updated Info.plist to use \${PRODUCT_NAME}');
 }
 
-Future<void> _deleteMainDart() async {
-  print('\n🗑️ Deleting lib/main.dart...');
-
-  final mainFile = File('lib/main.dart');
-  if (!mainFile.existsSync()) {
-    print('⚠️ lib/main.dart not found. Nothing to delete.');
-    return;
-  }
-
-  await mainFile.delete();
-  print('✅ Deleted lib/main.dart');
-}
+/// Updates main.dart to be a simple entry point that imports the app file
 
 Future<void> _podInstallIos() async {
   print('\n📦 Running pod install...');
@@ -1801,6 +1871,33 @@ Future<void> _checkIfFlavorAlreadyExists(List<String> flavors) async {
     }
   }
 }
+
+Future<void> _removeVSCodeLaunchConfig() async {
+  print('\n🔧 Removing VS Code/Cursor launch configurations...');
+
+  final vscodeDir = Directory('.vscode');
+  vscodeDir.createSync(recursive: true);
+
+  final launchFile = File('.vscode/launch.json');
+  if (!launchFile.existsSync()) {
+    print('✅ No VS Code/Cursor launch configurations found');
+    return;
+  }
+  launchFile.deleteSync();
+  print('✅ Removed VS Code/Cursor launch configurations');
+}
+
+Future<void> _deleteMainDart() async {
+  print('\n🗑️ Deleting lib/main.dart...');
+  final mainFile = File('lib/main.dart');
+  if (!mainFile.existsSync()) {
+    print('⚠️ lib/main.dart not found. Nothing to delete.');
+    return;
+  }
+  await mainFile.delete();
+  print('✅ Deleted lib/main.dart');
+}
+
 // TODO Add this when we have a way to recreate common flavors
 // Future<void> _removeExistingFlavors(List<String> flavorsToRemove) async {
 //   print('🗑️  Removing existing flavor configurations...');
