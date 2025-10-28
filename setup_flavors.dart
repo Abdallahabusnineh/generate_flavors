@@ -27,26 +27,38 @@ Future<void> main() async {
   final existingBundleId = await _readExistingBundleId();
   final existingPackageName = await _readExistingPackageName();
 
+  // Check if flavors already exist
+  final hasExistingFlavors = await _hasExistingFlavors();
+
   // Handle iOS Bundle ID
   String baseBundleId;
   if (existingBundleId != null) {
-    print('\n📱 Found existing iOS Bundle ID: $existingBundleId');
-    stdout.write(
-      'Do you want to:\n'
-      '  1. Keep this Bundle ID\n'
-      '  2. Enter a new Bundle ID\n'
-      'Enter your choice (1/2): ',
-    );
-    final bundleChoice = stdin.readLineSync()?.trim();
-
-    if (bundleChoice == '1') {
+    if (hasExistingFlavors) {
+      // Lock the bundle ID if flavors already exist
       baseBundleId = existingBundleId;
-      print('✅ Using existing Bundle ID: $baseBundleId');
-    } else if (bundleChoice == '2') {
-      baseBundleId = await _promptForBundleId();
+      print('\n📱 Found existing iOS Bundle ID: $existingBundleId');
+      print(
+        '🔒 Bundle ID is locked (flavors already exist). Using: $baseBundleId',
+      );
     } else {
-      print('❌ Invalid choice. Exiting.');
-      exit(0);
+      print('\n📱 Found existing iOS Bundle ID: $existingBundleId');
+      stdout.write(
+        'Do you want to:\n'
+        '  1. Keep this Bundle ID\n'
+        '  2. Enter a new Bundle ID\n'
+        'Enter your choice (1/2): ',
+      );
+      final bundleChoice = stdin.readLineSync()?.trim();
+
+      if (bundleChoice == '1') {
+        baseBundleId = existingBundleId;
+        print('✅ Using existing Bundle ID: $baseBundleId');
+      } else if (bundleChoice == '2') {
+        baseBundleId = await _promptForBundleId();
+      } else {
+        print('❌ Invalid choice. Exiting.');
+        exit(0);
+      }
     }
   } else {
     print('\n📱 No existing iOS Bundle ID found.');
@@ -56,23 +68,32 @@ Future<void> main() async {
   // Handle Android Package Name
   String androidPackageName;
   if (existingPackageName != null) {
-    print('\n🤖 Found existing Android package name: $existingPackageName');
-    stdout.write(
-      'Do you want to:\n'
-      '  1. Keep this package name\n'
-      '  2. Enter a new package name\n'
-      'Enter your choice (1/2): ',
-    );
-    final packageChoice = stdin.readLineSync()?.trim();
-
-    if (packageChoice == '1') {
+    if (hasExistingFlavors) {
+      // Lock the package name if flavors already exist
       androidPackageName = existingPackageName;
-      print('✅ Using existing package name: $androidPackageName');
-    } else if (packageChoice == '2') {
-      androidPackageName = await _promptForPackageName();
+      print('\n🤖 Found existing Android package name: $existingPackageName');
+      print(
+        '🔒 Package name is locked (flavors already exist). Using: $androidPackageName',
+      );
     } else {
-      print('❌ Invalid choice. Exiting.');
-      exit(0);
+      print('\n🤖 Found existing Android package name: $existingPackageName');
+      stdout.write(
+        'Do you want to:\n'
+        '  1. Keep this package name\n'
+        '  2. Enter a new package name\n'
+        'Enter your choice (1/2): ',
+      );
+      final packageChoice = stdin.readLineSync()?.trim();
+
+      if (packageChoice == '1') {
+        androidPackageName = existingPackageName;
+        print('✅ Using existing package name: $androidPackageName');
+      } else if (packageChoice == '2') {
+        androidPackageName = await _promptForPackageName();
+      } else {
+        print('❌ Invalid choice. Exiting.');
+        exit(0);
+      }
     }
   } else {
     print('\n🤖 No existing Android package name found.');
@@ -125,6 +146,50 @@ Future<void> main() async {
   for (final f in flavors) {
     print('flutter run --flavor $f -t lib/main_$f.dart');
   }
+}
+
+/// Check if any flavors already exist in the project
+Future<bool> _hasExistingFlavors() async {
+  // Check Android flavors
+  final gradleFile = File('android/app/build.gradle');
+  final gradleKtsFile = File('android/app/build.gradle.kts');
+  final androidFile = gradleKtsFile.existsSync() ? gradleKtsFile : gradleFile;
+
+  if (androidFile.existsSync()) {
+    final androidContent = await androidFile.readAsString();
+    if (androidContent.contains('productFlavors')) {
+      return true;
+    }
+  }
+
+  // Check iOS schemes
+  final schemesDir = Directory('ios/Runner.xcodeproj/xcshareddata/xcschemes');
+  if (schemesDir.existsSync()) {
+    final schemes = await schemesDir.list().toList();
+    // Check if there are any schemes other than Runner.xcscheme
+    for (final scheme in schemes) {
+      if (scheme is File && scheme.path.endsWith('.xcscheme')) {
+        final schemeName = scheme.path.split('/').last;
+        if (schemeName != 'Runner.xcscheme') {
+          return true;
+        }
+      }
+    }
+  }
+
+  // Check for main_*.dart files
+  final libDir = Directory('lib');
+  if (libDir.existsSync()) {
+    await for (final entity in libDir.list()) {
+      if (entity is File &&
+          entity.path.contains('main_') &&
+          entity.path.endsWith('.dart')) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 Future<String> _promptForBundleId() async {
@@ -1322,7 +1387,9 @@ Future<void> _createVSCodeLaunchConfig(
   final libDir = Directory('lib');
   if (libDir.existsSync()) {
     await for (final entity in libDir.list()) {
-      if (entity is File && entity.path.contains('main_') && entity.path.contains('.dart')) {
+      if (entity is File &&
+          entity.path.contains('main_') &&
+          entity.path.contains('.dart')) {
         final filename = entity.path.split('/').last;
         final flavorMatch = RegExp(r'main_(\w+)\.dart').firstMatch(filename);
         if (flavorMatch != null) {
