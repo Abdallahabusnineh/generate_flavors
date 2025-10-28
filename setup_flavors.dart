@@ -116,6 +116,34 @@ Future<void> main() async {
           .map((f) => f.trim().toLowerCase())
           .where((f) => f.isNotEmpty)
           .toList();
+
+  // Validate flavor names against reserved keywords
+  final reservedKeywords = [
+    'test',
+    'androidTest',
+    'debug',
+    'release',
+    'profile',
+    'main',
+  ];
+
+  final invalidFlavors =
+      flavors.where((f) => reservedKeywords.contains(f)).toList();
+
+  if (invalidFlavors.isNotEmpty) {
+    print(
+      '\n❌ Error: The following flavor names are reserved and cannot be used:',
+    );
+    for (final flavor in invalidFlavors) {
+      print('   • $flavor');
+    }
+    print('\n💡 Suggestions:');
+    print('   • Instead of "test", use: testing, beta, staging, demo');
+    print('   • Instead of "debug/release", these are already build types');
+    print('\n   Please run the script again with valid flavor names.');
+    exit(0);
+  }
+
   await _checkIfFlavorAlreadyExists(flavors);
 
   print('\n🚀 Starting flavor setup for: ${flavors.join(', ')}');
@@ -124,7 +152,7 @@ Future<void> main() async {
   print('🤖 Android Package: $androidPackageName');
   print('📄 App File: lib/$appFileName.dart\n');
 
-  await _createEnvFiles(flavors);
+  // await _createEnvFiles(flavors);
   await _setupAndroid(flavors, appName, androidPackageName);
   await _setupIOSPodfile();
   await _setupIOS(flavors, appName, baseBundleId);
@@ -330,20 +358,20 @@ String _toTitleCase(String input) {
       .join(' ');
 }
 
-Future<void> _createEnvFiles(List<String> flavors) async {
-  print('📁 Creating .env files...');
-  for (final flavor in flavors) {
-    final file = File('.env.$flavor');
-    if (!file.existsSync()) {
-      file.writeAsStringSync(
-        'FLAVOR=$flavor\nAPI_URL=https://api.$flavor.example.com',
-      );
-      print('✅ Created ${file.path}');
-    } else {
-      print('⚠️ ${file.path} already exists, skipped');
-    }
-  }
-}
+// Future<void> _createEnvFiles(List<String> flavors) async {
+//   print('📁 Creating .env files...');
+//   for (final flavor in flavors) {
+//     final file = File('.env.$flavor');
+//     if (!file.existsSync()) {
+//       file.writeAsStringSync(
+//         'FLAVOR=$flavor\nAPI_URL=https://api.$flavor.example.com',
+//       );
+//       print('✅ Created ${file.path}');
+//     } else {
+//       print('⚠️ ${file.path} already exists, skipped');
+//     }
+//   }
+// }
 
 Future<void> _setupAndroid(
   List<String> flavors,
@@ -408,113 +436,189 @@ Future<void> _setupAndroid(
   if (content.contains('productFlavors')) {
     print('⚠️ Android flavors already configured. Adding new flavors...');
 
-    // Find the productFlavors block
-    final productFlavorsPattern =
-        isKts
-            ? RegExp(
-              r'productFlavors\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}',
-              multiLine: true,
-              dotAll: true,
-            )
-            : RegExp(
-              r'productFlavors\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}',
-              multiLine: true,
-              dotAll: true,
-            );
-
-    final match = productFlavorsPattern.firstMatch(content);
-
-    if (match != null) {
-      var existingFlavorsBlock = match.group(1)!;
-      final fullMatch = match.group(0)!;
-
-      // Filter out flavors that already exist in the block
-      final newFlavors =
-          flavors.where((f) {
-            final flavorExists =
-                isKts
-                    ? existingFlavorsBlock.contains('create("$f")')
-                    : existingFlavorsBlock.contains('$f {');
-
-            if (flavorExists) {
-              print('⚠️ Flavor "$f" already exists, skipping');
-            }
-            return !flavorExists;
-          }).toList();
-
-      if (newFlavors.isEmpty) {
-        print('✅ No new flavors to add');
-        return;
-      }
-
-      // Generate new flavor definitions
-      final newFlavorDefinitions =
-          isKts
-              ? newFlavors
-                  .map(
-                    (f) => '''
-        create("$f") {
-            dimension = "default"
-            ${f != 'prod' ? 'applicationIdSuffix = ".$f"' : ''}
-            resValue("string", "app_name", "$appName${f != 'prod' ? ' ${f.toUpperCase()}' : ''}")
-        }''',
-                  )
-                  .join('\n')
-              : newFlavors
-                  .map(
-                    (f) => '''
-        $f {
-            dimension "default"
-            ${f != 'prod' ? 'applicationIdSuffix ".$f"' : ''}
-            resValue "string", "app_name", "$appName${f != 'prod' ? ' ${f.toUpperCase()}' : ''}"
-        }''',
-                  )
-                  .join('\n');
-
-      // Append new flavors to the existing block
-      final updatedFlavorsBlock =
-          '${existingFlavorsBlock.trimRight()}\n$newFlavorDefinitions\n    ';
-
-      // Replace the old productFlavors block with the updated one
-      content = content.replaceFirst(
-        fullMatch,
-        'productFlavors {$updatedFlavorsBlock}',
-      );
-
-      await targetFile.writeAsString(content);
-      print('✅ Added new flavors: ${newFlavors.join(', ')}');
+    // Find the productFlavors block using proper brace counting
+    final productFlavorsStart = content.indexOf('productFlavors');
+    if (productFlavorsStart == -1) {
+      print('⚠️ Could not find productFlavors block');
+      return;
     }
+
+    // Find the opening brace
+    var pos = content.indexOf('{', productFlavorsStart);
+    if (pos == -1) {
+      print('⚠️ Could not find opening brace for productFlavors');
+      return;
+    }
+
+    final blockStart = pos;
+    var braceCount = 1;
+    pos++;
+
+    // Count braces to find the matching closing brace
+    while (pos < content.length && braceCount > 0) {
+      if (content[pos] == '{') {
+        braceCount++;
+      } else if (content[pos] == '}') {
+        braceCount--;
+      }
+      pos++;
+    }
+
+    if (braceCount != 0) {
+      print('⚠️ Malformed productFlavors block (unmatched braces)');
+      return;
+    }
+
+    final blockEnd = pos;
+    var existingFlavorsBlock = content.substring(blockStart + 1, blockEnd - 1);
+
+    final newFlavors =
+        flavors.where((f) {
+          final flavorExists =
+              isKts
+                  ? existingFlavorsBlock.contains('create("$f")')
+                  : existingFlavorsBlock.contains('$f {');
+
+          if (flavorExists) {
+            print('⚠️ Flavor "$f" already exists, skipping');
+          }
+          return !flavorExists;
+        }).toList();
+
+    if (newFlavors.isEmpty) {
+      print('✅ No new flavors to add');
+      return;
+    }
+
+    // Generate new flavor definitions with proper formatting
+    final newFlavorDefinitions = StringBuffer();
+    for (var i = 0; i < newFlavors.length; i++) {
+      final f = newFlavors[i];
+      if (isKts) {
+        newFlavorDefinitions.write('''
+        create("$f") {
+            dimension = "default"''');
+        if (f != 'prod') {
+          newFlavorDefinitions.write(
+            '\n            applicationIdSuffix = ".$f"',
+          );
+        }
+        newFlavorDefinitions.write('''
+
+            resValue("string", "app_name", "$appName${f != 'prod' ? ' ${f.toUpperCase()}' : ''}")
+        }''');
+      } else {
+        newFlavorDefinitions.write('''
+        $f {
+            dimension "default"''');
+        if (f != 'prod') {
+          newFlavorDefinitions.write('\n            applicationIdSuffix ".$f"');
+        }
+        newFlavorDefinitions.write('''
+
+            resValue "string", "app_name", "$appName${f != 'prod' ? ' ${f.toUpperCase()}' : ''}"
+        }''');
+      }
+      if (i < newFlavors.length - 1) {
+        newFlavorDefinitions.write('\n');
+      }
+    }
+
+    // Append new flavors to the existing block
+    final updatedFlavorsBlock =
+        '${existingFlavorsBlock.trimRight()}\n$newFlavorDefinitions\n    ';
+
+    // Replace the old productFlavors block with the updated one
+    final beforeBlock = content.substring(0, productFlavorsStart);
+    final afterBlock = content.substring(blockEnd);
+    content = '${beforeBlock}productFlavors {$updatedFlavorsBlock}$afterBlock';
+
+    await targetFile.writeAsString(content);
+    print('✅ Added new flavors: ${newFlavors.join(', ')}');
   } else {
     // No productFlavors block exists, create it with all flavors
+    final flavorDefinitions = StringBuffer();
+    for (var i = 0; i < flavors.length; i++) {
+      final f = flavors[i];
+      if (isKts) {
+        flavorDefinitions.write('''
+        create("$f") {
+            dimension = "default"''');
+        if (f != 'prod') {
+          flavorDefinitions.write('\n            applicationIdSuffix = ".$f"');
+        }
+        flavorDefinitions.write('''
+
+            resValue("string", "app_name", "$appName${f != 'prod' ? ' ${f.toUpperCase()}' : ''}")
+        }''');
+      } else {
+        flavorDefinitions.write('''
+        $f {
+            dimension "default"''');
+        if (f != 'prod') {
+          flavorDefinitions.write('\n            applicationIdSuffix ".$f"');
+        }
+        flavorDefinitions.write('''
+
+            resValue "string", "app_name", "$appName${f != 'prod' ? ' ${f.toUpperCase()}' : ''}"
+        }''');
+      }
+      if (i < flavors.length - 1) {
+        flavorDefinitions.write('\n');
+      }
+    }
+
     final flavorBlock =
         isKts
             ? '''
     flavorDimensions += "default"
     productFlavors {
-${flavors.map((f) => '''
-        create("$f") {
-            dimension = "default"
-            ${f != 'prod' ? 'applicationIdSuffix = ".$f"' : ''}
-            resValue("string", "app_name", "$appName${f != 'prod' ? ' ${f.toUpperCase()}' : ''}")
-        }''').join('\n')}
+$flavorDefinitions
     }
 '''
             : '''
     flavorDimensions "default"
     productFlavors {
-${flavors.map((f) => '''
-        $f {
-            dimension "default"
-            ${f != 'prod' ? 'applicationIdSuffix ".$f"' : ''}
-            resValue "string", "app_name", "$appName${f != 'prod' ? ' ${f.toUpperCase()}' : ''}"
-        }''').join('\n')}
+$flavorDefinitions
     }
 ''';
 
-    final newContent = content.replaceFirstMapped(
-      RegExp(r'(defaultConfig\s*\{[^}]*\})', multiLine: true),
-      (match) => '${match.group(0)}\n$flavorBlock',
-    );
+    // Find defaultConfig block to insert flavors after it
+    final defaultConfigStart = content.indexOf('defaultConfig');
+    if (defaultConfigStart == -1) {
+      print('❌ Could not find defaultConfig block');
+      return;
+    }
+
+    // Find the opening brace
+    var pos = content.indexOf('{', defaultConfigStart);
+    if (pos == -1) {
+      print('❌ Could not find opening brace for defaultConfig');
+      return;
+    }
+
+    var braceCount = 1;
+    pos++;
+
+    // Count braces to find the matching closing brace
+    while (pos < content.length && braceCount > 0) {
+      if (content[pos] == '{') {
+        braceCount++;
+      } else if (content[pos] == '}') {
+        braceCount--;
+      }
+      pos++;
+    }
+
+    if (braceCount != 0) {
+      print('❌ Malformed defaultConfig block (unmatched braces)');
+      return;
+    }
+
+    final insertPosition = pos;
+    final beforeInsert = content.substring(0, insertPosition);
+    final afterInsert = content.substring(insertPosition);
+    final newContent = '$beforeInsert\n$flavorBlock$afterInsert';
 
     await targetFile.writeAsString(newContent);
     print('✅ Updated ${targetFile.path} with flavors.');
