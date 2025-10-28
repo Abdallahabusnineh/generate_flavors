@@ -1382,7 +1382,7 @@ Future<void> _createVSCodeLaunchConfig(
     }
   }
 
-  // Get all existing flavors from main_*.dart files
+  // Get all existing flavors from main_*.dart files (only create configs for flavors that actually exist)
   final allExistingFlavors = <String>{};
   final libDir = Directory('lib');
   if (libDir.existsSync()) {
@@ -1399,49 +1399,82 @@ Future<void> _createVSCodeLaunchConfig(
     }
   }
 
-  // Combine new flavors with existing ones
-  final allFlavors = {...allExistingFlavors, ...flavors}.toList()..sort();
+  // Only use flavors that actually exist (have main_*.dart files)
+  final flavorsToCreate = allExistingFlavors.toList()..sort();
 
-  // Remove old configurations for all flavors (to avoid duplicates)
-  existingConfigurations.removeWhere((config) {
-    final name = config['name'] as String?;
-    if (name == null) return false;
-
-    // Check if this config matches any flavor pattern
-    for (final flavor in allFlavors) {
-      if (name.contains(flavor.toUpperCase())) {
-        return true;
-      }
-    }
-    return false;
-  });
-
-  // Create new configurations for all flavors
-  final newConfigurations = <Map<String, dynamic>>[];
-  for (final flavor in allFlavors) {
-    // Debug configuration
-    newConfigurations.add({
-      'name': '$displayAppName - ${flavor.toUpperCase()} (Debug)',
-      'request': 'launch',
-      'type': 'dart',
-      'program': 'lib/main_$flavor.dart',
-      'args': ['--flavor', flavor],
-      'flutterMode': 'debug',
-    });
-
-    // Release configuration
-    newConfigurations.add({
-      'name': '$displayAppName - ${flavor.toUpperCase()} (Release)',
-      'request': 'launch',
-      'type': 'dart',
-      'program': 'lib/main_$flavor.dart',
-      'args': ['--flavor', flavor],
-      'flutterMode': 'release',
-    });
+  if (flavorsToCreate.isEmpty) {
+    print(
+      '⚠️  No flavors found (no main_*.dart files). Skipping launch.json update.',
+    );
+    return;
   }
 
-  // Combine: existing non-flavor configs + new flavor configs
-  final allConfigurations = [...existingConfigurations, ...newConfigurations];
+  // Extract existing flavor configurations to preserve their app names
+  final existingFlavorConfigs = <String, Map<String, dynamic>>{};
+  final nonFlavorConfigs = <Map<String, dynamic>>[];
+
+  final flavorPattern = RegExp(r'^(.+?)\s+-\s+([A-Z]+)\s+\((Debug|Release)\)$');
+
+  for (final config in existingConfigurations) {
+    final name = config['name'] as String?;
+    if (name == null) {
+      nonFlavorConfigs.add(config);
+      continue;
+    }
+
+    final match = flavorPattern.firstMatch(name);
+    if (match != null) {
+      final flavor = match.group(2)!.toLowerCase();
+      final mode = match.group(3)!;
+      final key = '$flavor-$mode';
+
+      // Only keep configs for flavors that still exist
+      if (allExistingFlavors.contains(flavor)) {
+        existingFlavorConfigs[key] = config;
+      }
+    } else {
+      nonFlavorConfigs.add(config);
+    }
+  }
+
+  // Create configurations for all existing flavors
+  final newConfigurations = <Map<String, dynamic>>[];
+  for (final flavor in flavorsToCreate) {
+    // Check if we already have configs for this flavor
+    final debugKey = '$flavor-Debug';
+    final releaseKey = '$flavor-Release';
+
+    // Debug configuration - preserve existing or create new
+    if (existingFlavorConfigs.containsKey(debugKey)) {
+      newConfigurations.add(existingFlavorConfigs[debugKey]!);
+    } else {
+      newConfigurations.add({
+        'name': '$displayAppName - ${flavor.toUpperCase()} (Debug)',
+        'request': 'launch',
+        'type': 'dart',
+        'program': 'lib/main_$flavor.dart',
+        'args': ['--flavor', flavor],
+        'flutterMode': 'debug',
+      });
+    }
+
+    // Release configuration - preserve existing or create new
+    if (existingFlavorConfigs.containsKey(releaseKey)) {
+      newConfigurations.add(existingFlavorConfigs[releaseKey]!);
+    } else {
+      newConfigurations.add({
+        'name': '$displayAppName - ${flavor.toUpperCase()} (Release)',
+        'request': 'launch',
+        'type': 'dart',
+        'program': 'lib/main_$flavor.dart',
+        'args': ['--flavor', flavor],
+        'flutterMode': 'release',
+      });
+    }
+  }
+
+  // Combine: non-flavor configs + flavor configs
+  final allConfigurations = [...nonFlavorConfigs, ...newConfigurations];
 
   final launchConfig = {
     'version': '0.2.0',
@@ -1452,9 +1485,20 @@ Future<void> _createVSCodeLaunchConfig(
     const JsonEncoder.withIndent('    ').convert(launchConfig),
   );
 
+  // Count preserved vs new configs
+  final preservedCount = existingFlavorConfigs.length;
+  final newCount = newConfigurations.length - preservedCount;
+
   print(
     '✅ Updated .vscode/launch.json with ${newConfigurations.length} flavor configurations',
   );
+  print('   📱 Flavors detected: ${flavorsToCreate.join(', ')}');
+  if (preservedCount > 0) {
+    print('   🔄 Preserved $preservedCount existing configuration(s)');
+  }
+  if (newCount > 0) {
+    print('   ✨ Created $newCount new configuration(s)');
+  }
   print('   📱 Available launch configurations:');
   for (final config in newConfigurations) {
     print('   • ${config['name']}');
