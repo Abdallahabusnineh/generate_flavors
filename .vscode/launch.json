@@ -1,0 +1,71 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "My Awesome App - DEV (Debug)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main_dev.dart",
+            "args": [
+                "--flavor",
+                "dev"
+            ],
+            "flutterMode": "debug"
+        },
+        {
+            "name": "My Awesome App - DEV (Release)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main_dev.dart",
+            "args": [
+                "--flavor",
+                "dev"
+            ],
+            "flutterMode": "release"
+        },
+        {
+            "name": "My Awesome App - DEV2 (Debug)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main_dev2.dart",
+            "args": [
+                "--flavor",
+                "dev2"
+            ],
+            "flutterMode": "debug"
+        },
+        {
+            "name": "My Awesome App - DEV2 (Release)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main_dev2.dart",
+            "args": [
+                "--flavor",
+                "dev2"
+            ],
+            "flutterMode": "release"
+        },
+        {
+            "name": "My Awesome App - PROD (Debug)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main_prod.dart",
+            "args": [
+                "--flavor",
+                "prod"
+            ],
+            "flutterMode": "debug"
+        },
+        {
+            "name": "My Awesome App - PROD (Release)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main_prod.dart",
+            "args": [
+                "--flavor",
+                "prod"
+            ],
+            "flutterMode": "release"
+        }
+    ]
+}

@@ -1,85 +1,66 @@
-# Flutter & Dart
-.dart_tool/
-.packages
-.pub/
-build/
-.flutter-plugins
-.flutter-plugins-dependencies
-.melos_tool/
-generated_plugin_registrant.dart
-
-# Environment & cache
-pubspec.lock
-.env
-.env.*
+# Miscellaneous
+*.class
 *.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+migrate_working_dir/
 
-# VS Code
-.vscode/
-.history/
-.idea/
-
-# IntelliJ / Android Studio
+# IntelliJ related
 *.iml
 *.ipr
 *.iws
 .idea/
 
-# Android
-.gradle/
-local.properties
-**/android/key.properties
-**/android/app/release/
-**/android/app/upload-keystore.jks
-**/android/app/*.keystore
-**/android/app/*.jks
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
 
-# iOS / macOS
-ios/Pods/
-ios/.symlinks/
-ios/Flutter/Flutter.framework/
-ios/Flutter/Flutter.podspec
-ios/Flutter/Generated.xcconfig
-ios/Flutter/ephemeral/
-ios/Runner.xcworkspace/
-macos/Flutter/ephemeral/
-macos/Pods/
-macos/Runner.xcworkspace/
-**/DerivedData/
-*.xcuserstate
-*.xcworkspace
-*.xcuserdata/
-*.moved-aside
-*.xcuserdatad
-*.mode1v3
-*.mode2v3
-*.perspectivev3
-*.pbxuser
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/build/
 
-# Web
-lib/generated_plugin_registrant.dart
-web/.dart_tool/
+# Symbolication related
+app.*.symbols
 
-# Windows
-windows/flutter/ephemeral/
+# Obfuscation related
+app.*.map.json
 
-# Linux
-linux/flutter/ephemeral/
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
 
-# Miscellaneous
-*.lock
-*.tmp
-*.bak
-*.swp
-*.DS_Store
-Thumbs.db
-*.orig
-*.rej
-
-# Firebase / Secrets
-google-services.json
-GoogleService-Info.plist
-firebase_app_id_file.json
+# iOS
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/ephemeral
+**/ios/Flutter/app.flx
+**/ios/Flutter/app.zip
+**/ios/Flutter/flutter_assets/
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/ServiceDefinitions.json
+**/ios/Runner/GeneratedPluginRegistrant.*
 
 # Coverage
 coverage/
+
+# Test related
+.test_coverage.dart
+coverage.json
+lcov.info
