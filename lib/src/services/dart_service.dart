@@ -1,4 +1,5 @@
 import 'dart:io';
+
 import '../models/project_config.dart';
 import '../models/setup_result.dart';
 import '../utils/console_utils.dart';
@@ -13,12 +14,13 @@ class DartService {
     // Create entry files for each flavor
     await _createDartEntryFiles(
       config.flavorNames,
-      config.appName,
+      config.appName.replaceAll(' ', ''),
       config.appFileName,
     );
 
     // Update widget test
-    await _updateWidgetTest(config.appName, config.appFileName);
+    await _updateWidgetTest(
+        config.appName.replaceAll(' ', ''), config.appFileName);
 
     // Delete main.dart
     await _deleteMainDart();
@@ -31,11 +33,11 @@ class DartService {
     String appFileName,
   ) async {
     ConsoleUtils.step('📦 Extracting app code from main.dart...');
-
+    final appNameWithoutSpaces = appName.replaceAll(' ', '');
     final mainFile = File('lib/main.dart');
     if (!mainFile.existsSync()) {
       ConsoleUtils.error('lib/main.dart not found. Creating a new app file.');
-      await _createNewAppFile(appName, appFileName);
+      await _createNewAppFile(appNameWithoutSpaces, appFileName);
       return;
     }
 
@@ -65,14 +67,14 @@ class DartService {
     // Rename the detected class to user's app name
     final renamedContent = appContent.replaceAllMapped(
       RegExp('\\b$originalClassName\\b'),
-      (match) => appName,
+      (match) => appNameWithoutSpaces,
     );
 
     // Create the new app file
     final appFile = File('lib/$appFileName.dart');
     appFile.writeAsStringSync(renamedContent);
     ConsoleUtils.success(
-      'Created lib/$appFileName.dart with $appName class (renamed from $originalClassName)',
+      'Created lib/$appFileName.dart with $appNameWithoutSpaces class (renamed from $originalClassName)',
     );
   }
 
@@ -146,6 +148,7 @@ class DartService {
 
   Future<void> _createNewAppFile(String appName, String appFileName) async {
     final appFile = File('lib/$appFileName.dart');
+   
     appFile.writeAsStringSync('''
 import 'package:flutter/material.dart';
 
