@@ -18,7 +18,6 @@ dev_dependencies:
   flutter_lints: ^5.0.0
 
 executables:
-  setup_flavors: bin/setup_flavors.dart
-
+  setup_flavors:
 flutter:
   uses-material-design: true
