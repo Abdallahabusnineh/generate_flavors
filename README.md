@@ -295,10 +295,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- 📧 Email: your.email@example.com
+- 📧 Email: [Abdallah Abusnineh](abusninehabdallah@gmail.com)
 - 🐛 Issues: [GitHub Issues](https://github.com/AbdallahAbusnineh/flutter_flavor_setup/issues)
 - 💬 Discussions: [GitHub Discussions](https://github.com/AbdallahAbusnineh/flutter_flavor_setup/discussions)
 
 ---
 
-Made with ❤️ by [Your Name](https://github.com/AbdallahAbusnineh)
+Made with ❤️ by [Abdallah Abusnineh](https://github.com/AbdallahAbusnineh)
