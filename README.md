@@ -295,10 +295,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- 📧 Email: [Abdallah Abusnineh](abusninehabdallah@gmail.com)
+- 📧 Email: [Abdallah Abusnineh](mailto:abusninehabdallah@gmail.com)
 - 🐛 Issues: [GitHub Issues](https://github.com/AbdallahAbusnineh/flutter_flavor_setup/issues)
 - 💬 Discussions: [GitHub Discussions](https://github.com/AbdallahAbusnineh/flutter_flavor_setup/discussions)
-
----
+- ☕ Support Me: [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-%2300AA00?style=for-the-badge&logo=buymeacoffee&logoColor=white)](https://buymeacoffee.com/abusninehaf)
 
 Made with ❤️ by [Abdallah Abusnineh](https://github.com/AbdallahAbusnineh)
