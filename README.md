@@ -221,30 +221,6 @@ lib/
 - **Dependency Inversion**: Services depend on abstractions (interfaces)
 - **Interface Segregation**: Specific interfaces for each service type
 
-## 🔧 Advanced Usage
-
-### Custom Service Implementation
-
-Extend the package with your own platform:
-
-```dart
-class MacOSService implements PlatformService {
-  @override
-  String get platformName => 'macOS';
-
-  @override
-  bool isPlatformAvailable() {
-    return Directory('macos').existsSync();
-  }
-
-  @override
-  Future<SetupResult> setupFlavors(ProjectConfig config) async {
-    // Your implementation
-    return SetupResult.success(message: 'macOS configured');
-  }
-}
-```
-
 ### Custom Validation
 
 Add custom validators:
@@ -320,9 +296,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 📞 Support
 
 - 📧 Email: your.email@example.com
-- 🐛 Issues: [GitHub Issues](https://github.com/yourusername/flutter_flavor_setup/issues)
-- 💬 Discussions: [GitHub Discussions](https://github.com/yourusername/flutter_flavor_setup/discussions)
+- 🐛 Issues: [GitHub Issues](https://github.com/AbdallahAbusnineh/flutter_flavor_setup/issues)
+- 💬 Discussions: [GitHub Discussions](https://github.com/AbdallahAbusnineh/flutter_flavor_setup/discussions)
 
 ---
 
-Made with ❤️ by [Your Name](https://github.com/yourusername)
+Made with ❤️ by [Your Name](https://github.com/AbdallahAbusnineh)

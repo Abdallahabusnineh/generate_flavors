@@ -1,12 +1,15 @@
 import 'dart:io';
+
+import 'package:flutter_flavor_setup/src/services/ios/podfile_installer.dart';
+
 import '../../models/project_config.dart';
 import '../../models/setup_result.dart';
 import '../../utils/console_utils.dart';
 import '../platform_service.dart';
+import 'info_plist_updater.dart';
 import 'podfile_updater.dart';
 import 'xcode_project_updater.dart';
 import 'xcode_scheme_generator.dart';
-import 'info_plist_updater.dart';
 
 /// Service for iOS flavor setup
 class IOSService implements PlatformService {
@@ -14,16 +17,19 @@ class IOSService implements PlatformService {
   final XcodeProjectUpdater _projectUpdater;
   final XcodeSchemeGenerator _schemeGenerator;
   final InfoPlistUpdater _plistUpdater;
+  final PodfileInstaller _podfileInstaller;
 
   IOSService({
     PodfileUpdater? podfileUpdater,
     XcodeProjectUpdater? projectUpdater,
     XcodeSchemeGenerator? schemeGenerator,
     InfoPlistUpdater? plistUpdater,
+    PodfileInstaller? podfileInstaller,
   })  : _podfileUpdater = podfileUpdater ?? PodfileUpdater(),
         _projectUpdater = projectUpdater ?? XcodeProjectUpdater(),
         _schemeGenerator = schemeGenerator ?? XcodeSchemeGenerator(),
-        _plistUpdater = plistUpdater ?? InfoPlistUpdater();
+        _plistUpdater = plistUpdater ?? InfoPlistUpdater(),
+        _podfileInstaller = podfileInstaller ?? PodfileInstaller();
 
   @override
   String get platformName => 'iOS';
@@ -40,7 +46,7 @@ class IOSService implements PlatformService {
 
     // Update Info.plist
     await _plistUpdater.updateInfoPlist();
-
+    await _podfileInstaller.createPodfile();
     // Update Podfile (must be done before project updates)
     final podfileResult =
         await _podfileUpdater.updatePodfile(config.flavorNames);

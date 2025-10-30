@@ -1,4 +1,5 @@
 import 'dart:io';
+
 import '../../models/setup_result.dart';
 import '../../utils/console_utils.dart';
 
@@ -9,7 +10,7 @@ class PodfileUpdater {
 
     final podfile = File('ios/Podfile');
     if (!podfile.existsSync()) {
-      ConsoleUtils.warning('Podfile not found at ios/Podfile');
+      ConsoleUtils.warning('Podfile not found');
       return SetupResult.failure(message: 'Podfile not found');
     }
 
@@ -41,4 +42,6 @@ class PodfileUpdater {
 
     return SetupResult.success(message: 'Podfile updated');
   }
+
+
 }

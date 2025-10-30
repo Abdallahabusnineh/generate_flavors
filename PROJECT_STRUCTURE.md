@@ -277,8 +277,6 @@ CLI                     2       300       13%
 Total                  20      2340      100%
 ```
 
-## Complexity Metrics
-
 ### Before Refactoring
 
 ```

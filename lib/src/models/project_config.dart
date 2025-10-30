@@ -20,7 +20,6 @@ class ProjectConfig {
 
   /// Get package name from pubspec.yaml
   String get packageName {
-    // This will be set by the validator
     return appFileName;
   }
 
