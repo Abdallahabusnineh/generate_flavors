@@ -48,10 +48,10 @@ Run the setup wizard:
 dart run flutter_flavor_setup
 
 # If installed globally
-setup_flavors
+flutter_flavor_setup
 
 # Or directly from bin
-dart bin/setup_flavors.dart
+dart bin/flutter_flavor_setup.dart
 ```
 
 The wizard will guide you through:

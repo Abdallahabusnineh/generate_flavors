@@ -44,7 +44,7 @@ flutter_flavor_setup/
 │   └── 📄 flutter_flavor_setup.dart        [Public API]
 │
 ├── 📁 bin/
-│   └── 📄 setup_flavors.dart               [CLI Entry Point]
+│   └── 📄 flutter_flavor_setup.dart               [CLI Entry Point]
 │
 ├── 📁 example/
 │   └── 📄 example.dart                     [Usage Examples]
