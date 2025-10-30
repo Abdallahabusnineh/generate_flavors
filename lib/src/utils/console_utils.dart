@@ -5,23 +5,28 @@ class ConsoleUtils {
   ConsoleUtils._();
 
   // Console output methods
-  static void success(String message) => print('✅ $message');
-  static void error(String message) => print('❌ $message');
-  static void warning(String message) => print('⚠️  $message');
-  static void info(String message) => print('ℹ️  $message');
-  static void step(String message) => print('\n$message');
+  static void success(String message) =>
+      print(ConsoleUtils.boldGreen('✅ $message'));
+  static void error(String message) => print(ConsoleUtils.red('❌ $message'));
+  static void warning(String message) =>
+      print(ConsoleUtils.yellow('⚠️  $message'));
+  static void info(String message) => print(ConsoleUtils.blue('ℹ️  $message'));
+  static void step(String message) => print('\n${ConsoleUtils.blue(message)}');
 
   // Emoji output for different platforms
-  static void android(String message) => print('🤖 $message');
-  static void ios(String message) => print('🍎 $message');
-  static void dart(String message) => print('🎯 $message');
-  static void test(String message) => print('🧪 $message');
-  static void config(String message) => print('⚙️  $message');
-  static void file(String message) => print('📁 $message');
-  static void rocket(String message) => print('🚀 $message');
+  static void android(String message) =>
+      print(ConsoleUtils.boldGreen('🤖 $message'));
+  static void ios(String message) => print(ConsoleUtils.blue('🍎 $message'));
+  static void dart(String message) => print(ConsoleUtils.blue('🎯 $message'));
+  static void test(String message) => print(ConsoleUtils.yellow('🧪 $message'));
+  static void config(String message) =>
+      print(ConsoleUtils.blue('⚙️  $message'));
+  static void file(String message) => print(ConsoleUtils.blue('📁 $message'));
+  static void rocket(String message) =>
+      print(ConsoleUtils.boldGreen('🚀 $message'));
 
   /// Prints a separator line
-  static void separator() => print('\n${'─' * 60}\n');
+  static void separator() => print('\n${ConsoleUtils.blue('─' * 60)}\n');
 
   /// Prompts user for input
   static String? prompt(String message) {
@@ -41,4 +46,9 @@ class ConsoleUtils {
       print('$prefix $item');
     }
   }
+
+  static String boldGreen(String text) => '\x1B[1;32m$text\x1B[0m';
+  static String yellow(String text) => '\x1B[33m$text\x1B[0m';
+  static String red(String text) => '\x1B[31m$text\x1B[0m';
+  static String blue(String text) => '\x1B[34m$text\x1B[0m';
 }

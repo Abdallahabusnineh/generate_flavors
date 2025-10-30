@@ -241,7 +241,7 @@ dart run flutter_flavor_setup
 ```yaml
 dev_dependencies:
   flutter_flavor_setup:
-    git: https://github.com/yourusername/flutter_flavor_setup.git
+    git: https://github.com/Abdallahabusnineh/flutter_flavor_setup.git
 ```
 
 #### Option 3: Programmatically

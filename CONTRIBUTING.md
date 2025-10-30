@@ -22,7 +22,7 @@ This project adheres to a code of conduct. By participating, you are expected to
 1. Fork the repository on GitHub
 2. Clone your fork locally:
    ```bash
-   git clone https://github.com/yourusername/flutter_flavor_setup.git
+   git clone https://github.com/Abdallahabusnineh/flutter_flavor_setup.git
    cd flutter_flavor_setup
    ```
 3. Add the upstream repository:

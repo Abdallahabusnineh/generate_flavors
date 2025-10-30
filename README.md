@@ -22,7 +22,7 @@ Add to your `pubspec.yaml`:
 dev_dependencies:
   flutter_flavor_setup:
     git:
-      url: https://github.com/yourusername/flutter_flavor_setup.git
+      url: https://github.com/Abdallahabusnineh/flutter_flavor_setup.git
 ```
 
 Then run:
