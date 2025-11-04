@@ -64,3 +64,4 @@ coverage/
 .test_coverage.dart
 coverage.json
 lcov.info
+

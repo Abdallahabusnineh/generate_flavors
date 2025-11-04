@@ -44,7 +44,7 @@ flutter_flavor_setup/
 │   └── 📄 flutter_flavor_setup.dart        [Public API]
 │
 ├── 📁 bin/
-│   └── 📄 setup_flavors.dart               [CLI Entry Point]
+│   └── 📄 flutter_flavor_setup.dart               [CLI Entry Point]
 │
 ├── 📁 example/
 │   └── 📄 example.dart                     [Usage Examples]
@@ -261,51 +261,6 @@ flutter_flavor_setup.dart (Public API)
     └─── cli/
            ├─ CLIInterface
            └─ FlavorSetupCommand
-```
-
-## File Size Distribution
-
-```
-Category              Files    Lines    Percentage
-─────────────────────────────────────────────────
-Models                  3       120        5%
-Services               10      1400       60%
-Validators              2       280       12%
-Utils                   3       240       10%
-CLI                     2       300       13%
-─────────────────────────────────────────────────
-Total                  20      2340      100%
-```
-
-### Before Refactoring
-
-```
-┌─────────────────────────────────────┐
-│     setup_flavors.dart (2156 lines) │
-│  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓  │
-│  Complexity: ████████████ (Very High) │
-└─────────────────────────────────────┘
-```
-
-### After Refactoring
-
-```
-Models (120 lines)
-  ▓ (Low)
-
-Services (1400 lines across 10 files)
-  ▓▓▓▓▓ (Medium per file)
-
-Validators (280 lines across 2 files)
-  ▓▓ (Low)
-
-Utils (240 lines across 3 files)
-  ▓▓ (Low)
-
-CLI (300 lines across 2 files)
-  ▓▓▓ (Medium)
-
-Overall Complexity: ▓▓▓ (Low to Medium per file)
 ```
 
 ## Key Features by Component

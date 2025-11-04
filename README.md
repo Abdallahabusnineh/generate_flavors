@@ -20,9 +20,7 @@ Add to your `pubspec.yaml`:
 
 ```yaml
 dev_dependencies:
-  flutter_flavor_setup:
-    git:
-      url: https://github.com/Abdallahabusnineh/flutter_flavor_setup.git
+  flutter_flavor_setup: ^1.0.0
 ```
 
 Then run:
@@ -48,10 +46,8 @@ Run the setup wizard:
 dart run flutter_flavor_setup
 
 # If installed globally
-setup_flavors
+flutter_flavor_setup
 
-# Or directly from bin
-dart bin/setup_flavors.dart
 ```
 
 The wizard will guide you through:
