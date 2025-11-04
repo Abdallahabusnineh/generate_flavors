@@ -1,6 +1,6 @@
 name: flutter_flavor_setup
 description: A comprehensive tool for setting up and managing flavors (environments) in Flutter projects for both Android and iOS.
-version: 1.0.2
+version: 1.0.3
 homepage: https://github.com/AbdallahAbusnineh/flutter_flavor_setup
 repository: https://github.com/AbdallahAbusnineh/flutter_flavor_setup
 issue_tracker: https://github.com/AbdallahAbusnineh/flutter_flavor_setup/issues

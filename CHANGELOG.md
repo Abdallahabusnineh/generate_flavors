@@ -1,4 +1,4 @@
-## 1.0.2
+## 1.0.3
 
 - Marked package as **discontinued**.
 - Added `replaced_by: flutter_flavor_manager` in `pubspec.yaml`.
